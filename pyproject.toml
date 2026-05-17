@@ -32,5 +32,5 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 # Disable the pytest-homeassistant-custom-component plugin: it unconditionally
 # imports homeassistant.runner which pulls in the POSIX-only fcntl module and
-# crashes on Windows.  The coordinator tests use only unittest.mock.
+# crashes on Windows.  Tests use only unittest.mock.
 addopts = "-p no:homeassistant"

@@ -1,0 +1,594 @@
+"""Tests for TfiLiveSensor — state, attributes, and availability.
+
+Covers acceptance criteria AC 1, 2, 3, 4, 5, 6, 7, 7a, 8, 9, 11, 12, 13,
+24, and 25 from specs/001-core-sensor/spec.md, plus unique-ID stability and
+distinctness requirements from the spec's constraint section.
+
+Each test is self-contained.  The coordinator and static cache are replaced
+by lightweight ``MagicMock`` instances; no live HA instance is required.
+"""
+
+from datetime import date, datetime, timedelta
+from unittest.mock import MagicMock
+
+import pytest
+from homeassistant.components.sensor import SensorEntity
+
+from custom_components.tfi_live.const import (
+    ATTR_DEPARTURES,
+    ATTR_DIRECTION_ID,
+    ATTR_LAST_UPDATED,
+    ATTR_OPERATOR_ID,
+    ATTR_ROUTE_ID,
+    ATTR_STOP_ID,
+    DEP_DELAY_MINUTES,
+    DEP_REALTIME_TIME,
+    DEP_ROUTE_NAME,
+    DEP_SCHEDULED_TIME,
+    DEP_TRIP_ID,
+)
+from custom_components.tfi_live.sensor import TfiLiveSensor, _parse_hhmm_today
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def mock_coordinator():
+    """Return a minimal mocked coordinator with healthy defaults."""
+    coord = MagicMock()
+    coord.last_update_success = True
+    coord._last_successful_fetch = datetime.now()
+    coord.data = {"entities": []}
+    coord._cache = MagicMock()
+    coord._cache.get_scheduled_departures.return_value = []
+    return coord
+
+
+@pytest.fixture
+def sensor_config():
+    """Return a base sensor configuration dict."""
+    return {
+        "name": "Next 46A",
+        "stop_id": "STOP_A",
+        "route_id": "46A",
+        "direction_id": None,
+        "operator_id": None,
+    }
+
+
+@pytest.fixture
+def sensor(mock_coordinator, sensor_config):
+    """Return a TfiLiveSensor wired to the mocked coordinator."""
+    return TfiLiveSensor(mock_coordinator, sensor_config, "entry_123")
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def make_unix_ts(minutes_from_now: float) -> int:
+    """Return a Unix timestamp offset from the current time.
+
+    Args:
+        minutes_from_now: Positive values are in the future; negative in the
+            past.
+
+    Returns:
+        Integer Unix timestamp.
+    """
+    return int((datetime.now() + timedelta(minutes=minutes_from_now)).timestamp())
+
+
+def make_rt_entity(
+    trip_id: str,
+    route_id: str = "46A",
+    stop_id: str = "STOP_A",
+    direction_id=None,
+    minutes_from_now: float = 5.0,
+    delay_secs: int = 0,
+) -> dict:
+    """Build a minimal RT entity dict as the coordinator would produce.
+
+    Args:
+        trip_id: GTFS trip identifier.
+        route_id: GTFS route identifier.
+        stop_id: GTFS stop identifier.
+        direction_id: Integer direction or None.
+        minutes_from_now: Arrival/departure offset from now in minutes.
+        delay_secs: Delay in seconds applied to both arrival and departure.
+
+    Returns:
+        Dict matching the shape expected by ``TfiLiveSensor._get_departures``.
+    """
+    ts = make_unix_ts(minutes_from_now)
+    return {
+        "trip_id": trip_id,
+        "route_id": route_id,
+        "direction_id": str(direction_id) if direction_id is not None else None,
+        "start_date": "20260517",
+        "stop_time_updates": [
+            {
+                "stop_id": stop_id,
+                "arrival_delay": delay_secs,
+                "departure_delay": delay_secs,
+                "arrival_time": ts,
+                "departure_time": ts,
+            }
+        ],
+    }
+
+
+# ---------------------------------------------------------------------------
+# AC 1 — Entity creation: sensor count
+# ---------------------------------------------------------------------------
+
+
+def test_entity_count(mock_coordinator):
+    """Two TfiLiveSensor instances can be constructed from two configs (AC 1)."""
+    # Arrange
+    cfg_a = {
+        "name": "Stop A",
+        "stop_id": "STOP_A",
+        "route_id": "46A",
+        "direction_id": None,
+        "operator_id": None,
+    }
+    cfg_b = {
+        "name": "Stop B",
+        "stop_id": "STOP_B",
+        "route_id": "39A",
+        "direction_id": None,
+        "operator_id": None,
+    }
+
+    # Act
+    sensor_a = TfiLiveSensor(mock_coordinator, cfg_a, "entry_1")
+    sensor_b = TfiLiveSensor(mock_coordinator, cfg_b, "entry_1")
+
+    # Assert
+    assert isinstance(sensor_a, TfiLiveSensor)
+    assert isinstance(sensor_b, TfiLiveSensor)
+
+
+# ---------------------------------------------------------------------------
+# AC 2 — No device_tracker; sensor is a SensorEntity
+# ---------------------------------------------------------------------------
+
+
+def test_no_device_tracker(sensor):
+    """TfiLiveSensor is a SensorEntity and not a device_tracker (AC 2)."""
+    assert isinstance(sensor, SensorEntity)
+
+
+# ---------------------------------------------------------------------------
+# AC 3a — State: floor of fractional positive minutes
+# ---------------------------------------------------------------------------
+
+
+def test_native_value_floor_positive(mock_coordinator, sensor_config):
+    """native_value is floor(2.9) == 2 for a departure 2.9 min away (AC 3)."""
+    # Arrange
+    mock_coordinator.data = {"entities": [make_rt_entity("T1", minutes_from_now=2.9)]}
+    s = TfiLiveSensor(mock_coordinator, sensor_config, "entry_123")
+
+    # Act
+    value = s.native_value
+
+    # Assert
+    assert value == 2
+
+
+# ---------------------------------------------------------------------------
+# AC 3b — State: floor of fractional negative minutes
+# ---------------------------------------------------------------------------
+
+
+def test_native_value_floor_negative(mock_coordinator, sensor_config):
+    """native_value is -1 for T = -1.3 as stated in spec AC 3.
+
+    The spec explicitly states "For T = -1.3, state = -1."  This implies
+    truncation toward zero (``int(-1.3) == -1``), not Python's
+    ``math.floor(-1.3) == -2``.  This test will fail if the implementation
+    uses ``math.floor`` rather than truncation for the negative case.
+    """
+    # Arrange — departure is slightly overdue but within the 5-min grace window
+    mock_coordinator.data = {
+        "entities": [make_rt_entity("T1", minutes_from_now=-1.3)]
+    }
+    s = TfiLiveSensor(mock_coordinator, sensor_config, "entry_123")
+
+    # Act
+    value = s.native_value
+
+    # Assert — spec says floor(-1.3) = -1 (truncation toward zero)
+    assert value == -1
+
+
+# ---------------------------------------------------------------------------
+# AC 4 — State: negative value when departure 2 min 45 sec in the past
+# ---------------------------------------------------------------------------
+
+
+def test_native_value_overdue_negative_2(mock_coordinator, sensor_config):
+    """native_value == -2 when departure was 2m45s ago, per spec AC 4.
+
+    The spec states the result must be ``-2``.  This implies truncation toward
+    zero rather than ``math.floor`` (which would give ``-3`` for T = -2.75).
+    This test will fail if the implementation rounds in the wrong direction.
+    """
+    # Arrange — 2 min 45 sec ago = -2.75 minutes
+    mock_coordinator.data = {
+        "entities": [make_rt_entity("T1", minutes_from_now=-2.75)]
+    }
+    s = TfiLiveSensor(mock_coordinator, sensor_config, "entry_123")
+
+    # Act
+    value = s.native_value
+
+    # Assert — spec mandates -2 (truncation toward zero, not math.floor)
+    assert value == -2
+
+
+# ---------------------------------------------------------------------------
+# AC 5 — State: scheduled fallback when no RT data exists
+# ---------------------------------------------------------------------------
+
+
+def test_native_value_scheduled_fallback_when_no_rt(mock_coordinator, sensor_config):
+    """When no RT entity exists, native_value uses scheduled time (AC 5).
+
+    The departure dict for a static-only trip must have realtime_time == None.
+    """
+    # Arrange — no RT entities; one static departure 10 min from now
+    mock_coordinator.data = {"entities": []}
+    future = datetime.now() + timedelta(minutes=10)
+    hhmm = future.strftime("%H:%M")
+    mock_coordinator._cache.get_scheduled_departures.return_value = [
+        ("TRIP_X", hhmm, "46A")
+    ]
+    s = TfiLiveSensor(mock_coordinator, sensor_config, "entry_123")
+
+    # Act
+    value = s.native_value
+    attrs = s.extra_state_attributes
+
+    # Assert
+    assert value is not None
+    assert isinstance(value, int)
+    # Should be approximately 10 minutes (floor)
+    assert 8 <= value <= 10
+    assert attrs[ATTR_DEPARTURES][0][DEP_REALTIME_TIME] is None
+
+
+# ---------------------------------------------------------------------------
+# AC 6 — Departures attribute: at most 3 entries when 5 RT entities match
+# ---------------------------------------------------------------------------
+
+
+def test_departures_attribute_at_most_3(mock_coordinator, sensor_config):
+    """Given 5 matching RT departures, departures has exactly 3 entries (AC 6)."""
+    # Arrange — 5 RT entities each 1 min apart starting at 5 min from now
+    entities = [
+        make_rt_entity(f"T{i}", minutes_from_now=5.0 + i)
+        for i in range(1, 6)
+    ]
+    mock_coordinator.data = {"entities": entities}
+    s = TfiLiveSensor(mock_coordinator, sensor_config, "entry_123")
+
+    # Act
+    attrs = s.extra_state_attributes
+
+    # Assert
+    assert len(attrs[ATTR_DEPARTURES]) == 3
+
+
+# ---------------------------------------------------------------------------
+# AC 6b — Departures attribute: exact keys, no extras
+# ---------------------------------------------------------------------------
+
+
+def test_departures_attribute_exact_keys(mock_coordinator, sensor_config):
+    """Each departure dict has exactly the 5 specified keys and no others (AC 6)."""
+    # Arrange
+    mock_coordinator.data = {"entities": [make_rt_entity("T1", minutes_from_now=5.0)]}
+    s = TfiLiveSensor(mock_coordinator, sensor_config, "entry_123")
+    expected_keys = {
+        DEP_SCHEDULED_TIME,
+        DEP_REALTIME_TIME,
+        DEP_DELAY_MINUTES,
+        DEP_TRIP_ID,
+        DEP_ROUTE_NAME,
+    }
+
+    # Act
+    attrs = s.extra_state_attributes
+    departure = attrs[ATTR_DEPARTURES][0]
+
+    # Assert
+    assert set(departure.keys()) == expected_keys
+
+
+# ---------------------------------------------------------------------------
+# AC 7 — Departures attribute: fewer than 3 when only 1 departure exists
+# ---------------------------------------------------------------------------
+
+
+def test_departures_fewer_than_3(mock_coordinator, sensor_config):
+    """Given 1 matching RT departure, departures contains exactly 1 entry (AC 7)."""
+    # Arrange
+    mock_coordinator.data = {"entities": [make_rt_entity("T1", minutes_from_now=5.0)]}
+    s = TfiLiveSensor(mock_coordinator, sensor_config, "entry_123")
+
+    # Act
+    attrs = s.extra_state_attributes
+
+    # Assert
+    assert len(attrs[ATTR_DEPARTURES]) == 1
+
+
+# ---------------------------------------------------------------------------
+# AC 7a — Departures attribute: ascending sort order (RT before static)
+# ---------------------------------------------------------------------------
+
+
+def test_departures_sort_order(mock_coordinator, sensor_config):
+    """Departures are sorted [B-RT@5min, C-RT@8min, A-static@10min] (AC 7a)."""
+    # Arrange
+    future_10 = datetime.now() + timedelta(minutes=10)
+    hhmm_10min = future_10.strftime("%H:%M")
+
+    mock_coordinator._cache.get_scheduled_departures.return_value = [
+        ("T_A", hhmm_10min, "46A")
+    ]
+    mock_coordinator.data = {
+        "entities": [
+            make_rt_entity("T_B", minutes_from_now=5.0),
+            make_rt_entity("T_C", minutes_from_now=8.0),
+        ]
+    }
+    s = TfiLiveSensor(mock_coordinator, sensor_config, "entry_123")
+
+    # Act
+    attrs = s.extra_state_attributes
+    departures = attrs[ATTR_DEPARTURES]
+
+    # Assert
+    assert departures[0][DEP_TRIP_ID] == "T_B"
+    assert departures[1][DEP_TRIP_ID] == "T_C"
+    assert departures[2][DEP_TRIP_ID] == "T_A"
+
+
+# ---------------------------------------------------------------------------
+# AC 8 — No departures: state None, departures empty, still available
+# ---------------------------------------------------------------------------
+
+
+def test_no_departures_state_none_available_true(mock_coordinator, sensor_config):
+    """With no RT and no static, native_value is None and available is True (AC 8)."""
+    # Arrange — everything empty
+    mock_coordinator.data = {"entities": []}
+    mock_coordinator._cache.get_scheduled_departures.return_value = []
+    s = TfiLiveSensor(mock_coordinator, sensor_config, "entry_123")
+
+    # Act / Assert
+    assert s.native_value is None
+    assert s.available is True
+    assert s.extra_state_attributes[ATTR_DEPARTURES] == []
+
+
+# ---------------------------------------------------------------------------
+# AC 9 — Static unavailable: RT data still used; scheduled_time/route_name None
+# ---------------------------------------------------------------------------
+
+
+def test_static_unavailable_graceful(mock_coordinator, sensor_config):
+    """With static returning [], RT departure has scheduled_time None (AC 9)."""
+    # Arrange — one RT entity; static returns nothing
+    mock_coordinator.data = {"entities": [make_rt_entity("T1", minutes_from_now=5.0)]}
+    mock_coordinator._cache.get_scheduled_departures.return_value = []
+    s = TfiLiveSensor(mock_coordinator, sensor_config, "entry_123")
+
+    # Act
+    attrs = s.extra_state_attributes
+
+    # Assert
+    assert s.available is True
+    dep = attrs[ATTR_DEPARTURES][0]
+    assert dep[DEP_SCHEDULED_TIME] is None
+    assert dep[DEP_ROUTE_NAME] is None
+    # RT time is still present
+    assert dep[DEP_REALTIME_TIME] is not None
+
+
+# ---------------------------------------------------------------------------
+# AC 11 — Availability: False when last fetch is too old
+# ---------------------------------------------------------------------------
+
+
+def test_unavailable_when_fetch_old(mock_coordinator, sensor_config):
+    """available is False when _last_successful_fetch > 3 minutes ago (AC 11)."""
+    # Arrange — last fetch was 200 seconds ago (> 180 s window)
+    mock_coordinator._last_successful_fetch = datetime.now() - timedelta(seconds=200)
+    s = TfiLiveSensor(mock_coordinator, sensor_config, "entry_123")
+
+    # Assert
+    assert s.available is False
+
+
+# ---------------------------------------------------------------------------
+# AC 12 — Unavailable: all attribute values are None
+# ---------------------------------------------------------------------------
+
+
+def test_attributes_all_none_when_unavailable(mock_coordinator, sensor_config):
+    """When unavailable, all extra_state_attributes values are None (AC 12)."""
+    # Arrange
+    mock_coordinator._last_successful_fetch = datetime.now() - timedelta(seconds=200)
+    s = TfiLiveSensor(mock_coordinator, sensor_config, "entry_123")
+
+    # Act
+    attrs = s.extra_state_attributes
+
+    # Assert
+    assert s.available is False
+    assert s.native_value is None
+    for key, val in attrs.items():
+        assert val is None, f"Expected {key} to be None but got {val!r}"
+
+
+# ---------------------------------------------------------------------------
+# AC 13 — Availability: True when last fetch is recent
+# ---------------------------------------------------------------------------
+
+
+def test_available_when_fetch_recent(mock_coordinator, sensor_config):
+    """available is True when _last_successful_fetch is within 3 minutes (AC 13)."""
+    # Arrange — just updated
+    mock_coordinator._last_successful_fetch = datetime.now()
+    s = TfiLiveSensor(mock_coordinator, sensor_config, "entry_123")
+
+    # Assert
+    assert s.available is True
+
+
+# ---------------------------------------------------------------------------
+# AC 24 — Config values present in attributes
+# ---------------------------------------------------------------------------
+
+
+def test_config_values_in_attributes(mock_coordinator):
+    """stop_id, route_id, direction_id, operator_id match config exactly (AC 24)."""
+    # Arrange
+    cfg = {
+        "name": "Test Sensor",
+        "stop_id": "STOP_A",
+        "route_id": "46A",
+        "direction_id": None,
+        "operator_id": None,
+    }
+    s = TfiLiveSensor(mock_coordinator, cfg, "entry_123")
+
+    # Act
+    attrs = s.extra_state_attributes
+
+    # Assert
+    assert attrs[ATTR_STOP_ID] == "STOP_A"
+    assert attrs[ATTR_ROUTE_ID] == "46A"
+    assert attrs[ATTR_DIRECTION_ID] is None
+    assert attrs[ATTR_OPERATOR_ID] is None
+
+
+# ---------------------------------------------------------------------------
+# AC 25 — last_updated is an ISO 8601 string starting with the correct date
+# ---------------------------------------------------------------------------
+
+
+def test_last_updated_iso8601(mock_coordinator, sensor_config):
+    """last_updated attribute is an ISO 8601 string of the fetch time (AC 25).
+
+    The timestamp must be recent enough to keep the sensor available, so we
+    use a time 10 seconds ago.  We verify the format by round-tripping through
+    ``datetime.fromisoformat`` and confirming the date portion is correct.
+    """
+    # Arrange — use a timestamp that keeps the sensor available (<180 s ago)
+    fetch_time = datetime.now() - timedelta(seconds=10)
+    mock_coordinator._last_successful_fetch = fetch_time
+    s = TfiLiveSensor(mock_coordinator, sensor_config, "entry_123")
+
+    # Act
+    attrs = s.extra_state_attributes
+
+    # Assert — sensor must be available for last_updated to be non-None
+    assert s.available is True
+    last_updated = attrs[ATTR_LAST_UPDATED]
+    assert isinstance(last_updated, str)
+    # Must be parseable as ISO 8601
+    parsed = datetime.fromisoformat(last_updated)
+    assert parsed.date() == fetch_time.date()
+
+
+# ---------------------------------------------------------------------------
+# Unique ID — stability and distinctness
+# ---------------------------------------------------------------------------
+
+
+def test_unique_id_stable(mock_coordinator):
+    """The same config always produces the same unique_id."""
+    cfg = {
+        "name": "Sensor",
+        "stop_id": "STOP_A",
+        "route_id": "46A",
+        "direction_id": None,
+        "operator_id": None,
+    }
+    s1 = TfiLiveSensor(mock_coordinator, cfg, "entry_xyz")
+    s2 = TfiLiveSensor(mock_coordinator, cfg, "entry_xyz")
+
+    assert s1.unique_id == s2.unique_id
+
+
+def test_unique_id_distinct_direction(mock_coordinator):
+    """Sensors with different direction_id values have different unique_ids."""
+    base = {
+        "name": "Sensor",
+        "stop_id": "STOP_A",
+        "route_id": "46A",
+        "operator_id": None,
+    }
+    cfg_0 = {**base, "direction_id": 0}
+    cfg_1 = {**base, "direction_id": 1}
+
+    s0 = TfiLiveSensor(mock_coordinator, cfg_0, "entry_xyz")
+    s1 = TfiLiveSensor(mock_coordinator, cfg_1, "entry_xyz")
+
+    assert s0.unique_id != s1.unique_id
+
+
+def test_unique_id_distinct_operator(mock_coordinator):
+    """Sensors differing only in operator_id have different unique_ids."""
+    base = {
+        "name": "Sensor",
+        "stop_id": "STOP_A",
+        "route_id": "46A",
+        "direction_id": None,
+    }
+    cfg_nta = {**base, "operator_id": "NTA"}
+    cfg_none = {**base, "operator_id": None}
+
+    s_nta = TfiLiveSensor(mock_coordinator, cfg_nta, "entry_xyz")
+    s_none = TfiLiveSensor(mock_coordinator, cfg_none, "entry_xyz")
+
+    assert s_nta.unique_id != s_none.unique_id
+
+
+# ---------------------------------------------------------------------------
+# _parse_hhmm_today — unit tests
+# ---------------------------------------------------------------------------
+
+
+def test_parse_hhmm_today_returns_correct_time():
+    """_parse_hhmm_today returns a datetime with the expected hour and minute."""
+    # Arrange / Act
+    result = _parse_hhmm_today("09:35")
+
+    # Assert
+    assert result.hour == 9
+    assert result.minute == 35
+    assert result.date() == date.today()
+
+
+def test_parse_hhmm_today_midnight():
+    """_parse_hhmm_today handles midnight (00:00) correctly."""
+    result = _parse_hhmm_today("00:00")
+    assert result.hour == 0
+    assert result.minute == 0
+
+
+def test_parse_hhmm_today_last_minute_of_day():
+    """_parse_hhmm_today handles 23:59 correctly."""
+    result = _parse_hhmm_today("23:59")
+    assert result.hour == 23
+    assert result.minute == 59
