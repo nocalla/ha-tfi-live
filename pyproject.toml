@@ -19,6 +19,7 @@ dev = [
     "ruff>=0.4.0",
     "bandit>=1.7.0",
     "pydocstyle>=6.3.0",
+    "mypy>=2.1.0",
 ]
 
 [tool.ruff]
