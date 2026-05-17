@@ -1,7 +1,6 @@
 """Sensor entities for the TFI Live integration."""
 
 import logging
-import math
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -101,9 +100,11 @@ class TfiLiveSensor(CoordinatorEntity[TfiLiveCoordinator], SensorEntity):
             operator so that two sensors differing only in direction or
             operator receive distinct IDs.
         """
+        dir_segment = "" if self._direction_id is None else str(self._direction_id)
+        op_segment = self._operator_id or ""
         return (
             f"{self._entry_id}_{self._stop_id}_{self._route_id}"
-            f"_{self._direction_id or ''}_{self._operator_id or ''}"
+            f"_{dir_segment}_{op_segment}"
         )
 
     @property
@@ -156,15 +157,15 @@ class TfiLiveSensor(CoordinatorEntity[TfiLiveCoordinator], SensorEntity):
 
     @property
     def native_value(self) -> int | None:
-        """Return floor of minutes to the next departure, or None.
+        """Return truncated minutes to the next departure, or None.
 
         Uses real-time departure time when available; falls back to scheduled
         time.  Returns ``None`` when the sensor is unavailable or no departures
-        are found.
+        are found.  Truncation is toward zero: T = -1.3 min returns -1.
 
         Returns:
-            Minutes (floor, may be negative for overdue departures) or
-            ``None``.
+            Minutes (truncated toward zero, may be negative for overdue
+            departures) or ``None``.
         """
         if not self.available:
             return None
@@ -173,7 +174,7 @@ class TfiLiveSensor(CoordinatorEntity[TfiLiveCoordinator], SensorEntity):
             return None
         effective_dt = departures[0]["_effective_dt"]
         delta = (effective_dt - datetime.now()).total_seconds()
-        return int(math.floor(delta / 60))
+        return int(delta / 60)
 
     @property
     def extra_state_attributes(self) -> dict:
