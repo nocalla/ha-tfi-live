@@ -1,0 +1,11 @@
+{
+  "integration_icon": "mdi:bus-clock",
+  "services": {},
+  "entity": {
+    "sensor": {
+      "_": {
+        "default": "mdi:bus-clock"
+      }
+    }
+  }
+}
