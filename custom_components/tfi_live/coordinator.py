@@ -124,6 +124,16 @@ class TfiLiveCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         return {"entities": parsed_entities}
 
+    @property
+    def last_successful_fetch(self) -> datetime | None:
+        """Return the datetime of the last successful data fetch, or None.
+
+        Returns:
+            A ``datetime`` instance set when the most recent feed request
+            completed successfully, or ``None`` if no fetch has succeeded yet.
+        """
+        return self._last_successful_fetch
+
     def _log_once(
         self,
         error_key: str,
