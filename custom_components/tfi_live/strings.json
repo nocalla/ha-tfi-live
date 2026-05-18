@@ -24,6 +24,14 @@
         "data": {
           "api_key": "New API Key"
         }
+      },
+      "reconfigure": {
+        "title": "Reconfigure TFI Live",
+        "data": {
+          "api_key": "API Key",
+          "trip_update_url": "Trip Updates Feed URL",
+          "static_gtfs_url": "Static GTFS Feed URL"
+        }
       }
     },
     "error": {
@@ -35,7 +43,8 @@
     },
     "abort": {
       "reauth_successful": "Re-authentication was successful.",
-      "already_configured": "This integration is already configured."
+      "already_configured": "This integration is already configured.",
+      "reconfigure_successful": "Reconfiguration was successful."
     }
   }
 }
