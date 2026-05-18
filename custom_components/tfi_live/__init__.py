@@ -46,7 +46,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: TfiLiveConfigEntry) -> b
         await cache.async_load()
     except Exception:  # noqa: BLE001
         _logger.warning(
-            "Static GTFS load failed — route names will be unavailable until the"
+            "Static GTFS load failed -- route names will be unavailable until the"
             " next successful load"
         )
 

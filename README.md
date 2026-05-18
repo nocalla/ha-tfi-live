@@ -57,6 +57,15 @@ After adding a sensor you can add another or finish. Additional sensors can be a
 
 Stop and route IDs can be found in the [NTA GTFS static data](https://www.transportforireland.ie/transitData/PT_Data.html) or via tools such as [Transitland](https://www.transit.land/).
 
+## Removal
+
+To remove the integration:
+
+1. Go to **Settings -> Devices & Services -> TFI Live** and select **Delete**.
+2. Confirm the deletion. All associated entities are removed immediately.
+3. Re-adding the integration later will restore your sensors from the configuration you enter during setup.
+
+For **manual installs**: delete the `custom_components/tfi_live/` directory from your HA config directory and restart Home Assistant.
 ## Entity Model
 
 **State:** Integer minutes to the next departure (truncated toward zero). `None` when no upcoming service is found or when the feed has not been updated within the last 3 minutes.
