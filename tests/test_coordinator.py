@@ -221,8 +221,8 @@ async def test_last_successful_fetch_set_on_success(coordinator):
         await coordinator._async_update_data()
 
     # Assert
-    assert coordinator._last_successful_fetch is not None
-    assert isinstance(coordinator._last_successful_fetch, datetime)
+    assert coordinator.last_successful_fetch is not None
+    assert isinstance(coordinator.last_successful_fetch, datetime)
 
 
 # ---------------------------------------------------------------------------
@@ -232,7 +232,7 @@ async def test_last_successful_fetch_set_on_success(coordinator):
 
 def test_last_successful_fetch_is_none_before_any_call(coordinator):
     """TC-4: _last_successful_fetch is None immediately after construction."""
-    assert coordinator._last_successful_fetch is None
+    assert coordinator.last_successful_fetch is None
 
 
 # ---------------------------------------------------------------------------
