@@ -1,12 +1,12 @@
 """Static GTFS schedule cache for the TFI Live integration."""
 
+import csv
 import io
 import logging
 import zipfile
 from datetime import date, datetime, timedelta
 
 import aiohttp
-import pandas as pd
 
 from .const import STATIC_GTFS_REFRESH_HOURS
 
@@ -39,19 +39,22 @@ class StaticGtfsCache:
         self._loaded_at: datetime | None = None
         self._in_error_state: bool = False
 
-        self._stops: pd.DataFrame = pd.DataFrame()
-        self._routes: pd.DataFrame = pd.DataFrame()
-        self._trips: pd.DataFrame = pd.DataFrame()
-        self._stop_times: pd.DataFrame = pd.DataFrame()
-        self._calendar: pd.DataFrame = pd.DataFrame()
-        self._calendar_dates: pd.DataFrame = pd.DataFrame()
+        self._routes_by_id: dict[str, dict[str, str]] = {}
+        self._trips_by_id: dict[str, dict[str, str]] = {}
+        self._calendar: list[dict[str, str]] = []
+        self._calendar_dates: list[dict[str, str]] = []
+        # keyed by (stop_id, route_short_name)
+        # values: list of (trip_id, departure_time_raw, direction_id, agency_id_or_none)
+        self._departure_index: dict[
+            tuple[str, str], list[tuple[str, str, str, str | None]]
+        ] = {}
 
     async def async_load(self) -> None:
-        """Download and parse the static GTFS zip into in-memory DataFrames.
+        """Download and parse the static GTFS zip into in-memory dicts.
 
         Downloads the zip from the configured URL, extracts it in memory
-        (no disk writes), and builds DataFrames for stops, routes, trips,
-        stop_times, calendar, and calendar_dates.
+        (no disk writes), and builds pure-Python lookup structures for routes,
+        trips, calendar, calendar_dates, and a pre-joined departure index.
 
         On any download or parse failure the cache is marked unavailable and
         a WARNING is logged exactly once per failure run (deduplicated via
@@ -101,11 +104,15 @@ class StaticGtfsCache:
         self.available = False
 
     def _parse_zip(self, content: bytes) -> None:
-        """Extract a GTFS zip from raw bytes and populate internal DataFrames.
+        """Extract a GTFS zip from raw bytes and populate internal data structures.
 
         Reads the following files from the zip:
         ``stops.txt``, ``routes.txt``, ``trips.txt``, ``stop_times.txt``,
         ``calendar.txt``, ``calendar_dates.txt`` (optional).
+
+        Builds ``_routes_by_id``, ``_trips_by_id``, ``_calendar``,
+        ``_calendar_dates``, and ``_departure_index`` using Python's
+        ``csv.DictReader`` — no third-party libraries required.
 
         Args:
             content: Raw bytes of the GTFS zip archive.
@@ -117,35 +124,87 @@ class StaticGtfsCache:
         with zipfile.ZipFile(io.BytesIO(content)) as zf:
             names = set(zf.namelist())
 
-            def _read(filename: str) -> pd.DataFrame:
-                """Read a CSV file from the open zip into a DataFrame.
+            def _read_csv(filename: str) -> list[dict[str, str]]:
+                """Read a CSV file from the open zip into a list of row dicts.
 
                 Args:
                     filename: Name of the file inside the zip archive.
 
                 Returns:
-                    Parsed DataFrame with string dtypes.
+                    List of row dicts with string values; BOM-stripped headers.
                 """
                 with zf.open(filename) as fh:
-                    return pd.read_csv(
-                        fh,
-                        dtype=str,
-                        encoding="utf-8-sig",
-                        keep_default_na=False,
-                    )
+                    text = io.TextIOWrapper(fh, encoding="utf-8-sig")
+                    return list(csv.DictReader(text))
 
-            self._stops = _read("stops.txt")
-            self._routes = _read("routes.txt")
-            self._trips = _read("trips.txt")
-            self._stop_times = _read("stop_times.txt")
-            self._calendar = _read("calendar.txt")
+            routes_rows = _read_csv("routes.txt")
+            trips_rows = _read_csv("trips.txt")
+            stop_times_rows = _read_csv("stop_times.txt")
+            calendar_rows = _read_csv("calendar.txt")
 
             if "calendar_dates.txt" in names:
-                self._calendar_dates = _read("calendar_dates.txt")
+                calendar_dates_rows = _read_csv("calendar_dates.txt")
             else:
-                self._calendar_dates = pd.DataFrame(
-                    columns=["service_id", "date", "exception_type"]
+                calendar_dates_rows = []
+
+            # Build routes index: route_id → {route_short_name, agency_id}
+            self._routes_by_id = {
+                row["route_id"]: {
+                    "route_short_name": row.get("route_short_name", ""),
+                    "agency_id": row.get("agency_id", ""),
+                }
+                for row in routes_rows
+                if "route_id" in row
+            }
+
+            # Build trips index: trip_id → {route_id, direction_id, service_id}
+            self._trips_by_id = {
+                row["trip_id"]: {
+                    "route_id": row.get("route_id", ""),
+                    "direction_id": row.get("direction_id", ""),
+                    "service_id": row.get("service_id", ""),
+                }
+                for row in trips_rows
+                if "trip_id" in row
+            }
+
+            # Store calendar and calendar_dates as plain lists
+            self._calendar = calendar_rows
+            self._calendar_dates = calendar_dates_rows
+
+            # Build the departure index at parse time: join stop_times → trips → routes
+            departure_index: dict[
+                tuple[str, str], list[tuple[str, str, str, str | None]]
+            ] = {}
+
+            for st_row in stop_times_rows:
+                stop_id = st_row.get("stop_id", "")
+                trip_id = st_row.get("trip_id", "")
+                departure_time_raw = st_row.get("departure_time", "")
+
+                trip_info = self._trips_by_id.get(trip_id)
+                if trip_info is None:
+                    continue
+
+                route_id = trip_info["route_id"]
+                direction_id = trip_info["direction_id"]
+
+                route_info = self._routes_by_id.get(route_id)
+                if route_info is None:
+                    continue
+
+                route_short_name = route_info["route_short_name"]
+                agency_id_raw = route_info["agency_id"]
+                agency_id: str | None = agency_id_raw if agency_id_raw else None
+
+                key = (stop_id, route_short_name)
+                if key not in departure_index:
+                    departure_index[key] = []
+                departure_index[key].append(
+                    (trip_id, departure_time_raw, direction_id, agency_id)
                 )
+
+            self._departure_index = departure_index
 
     def _active_service_ids(self, target_date: date) -> set[str]:
         """Return the set of service IDs running on ``target_date``.
@@ -163,29 +222,27 @@ class StaticGtfsCache:
         date_str = target_date.strftime("%Y%m%d")
         weekday_col = _WEEKDAY_COLUMNS[target_date.weekday()]
 
-        active: set[str] = set()
-
-        if not self._calendar.empty and all(
-            col in self._calendar.columns
-            for col in ("service_id", "start_date", "end_date", weekday_col)
-        ):
-            mask = (
-                (self._calendar[weekday_col] == "1")
-                & (self._calendar["start_date"] <= date_str)
-                & (self._calendar["end_date"] >= date_str)
+        active: set[str] = set(
+            row["service_id"]
+            for row in self._calendar
+            if (
+                "service_id" in row
+                and "start_date" in row
+                and "end_date" in row
+                and weekday_col in row
+                and row[weekday_col] == "1"
+                and row["start_date"] <= date_str
+                and row["end_date"] >= date_str
             )
-            active = set(self._calendar.loc[mask, "service_id"].tolist())
+        )
 
-        if not self._calendar_dates.empty and all(
-            col in self._calendar_dates.columns
-            for col in ("service_id", "date", "exception_type")
-        ):
-            exceptions = self._calendar_dates[self._calendar_dates["date"] == date_str]
-            for _, row in exceptions.iterrows():
-                if row["exception_type"] == "1":
-                    active.add(row["service_id"])
-                elif row["exception_type"] == "2":
-                    active.discard(row["service_id"])
+        for row in self._calendar_dates:
+            if row.get("date") == date_str:
+                sid = row.get("service_id", "")
+                if row.get("exception_type") == "1":
+                    active.add(sid)
+                elif row.get("exception_type") == "2":
+                    active.discard(sid)
 
         return active
 
@@ -218,9 +275,9 @@ class StaticGtfsCache:
     ) -> list[tuple[str, str, str | None]]:
         """Return scheduled departures for a stop/route on a given date.
 
-        Joins ``stop_times`` → ``trips`` → ``routes`` and filters by
-        ``stop_id``, route short name, optional ``direction_id``, optional
-        ``agency_id``, and service validity on ``target_date``.
+        Looks up the pre-built ``_departure_index`` by ``(stop_id,
+        route_short_name)`` and filters by active service IDs, optional
+        ``direction_id``, and optional ``agency_id``.
 
         Args:
             stop_id: GTFS stop ID to filter on.
@@ -244,47 +301,30 @@ class StaticGtfsCache:
         if not active_services:
             return []
 
-        st = self._stop_times
-        tr = self._trips
-        ro = self._routes
-
-        if st.empty or tr.empty or ro.empty:
+        candidates = self._departure_index.get((stop_id, route_id), [])
+        if not candidates:
             return []
 
-        merged = st.merge(tr, on="trip_id", how="inner")
-        merged = merged.merge(ro, on="route_id", how="inner")
-
-        mask = (
-            (merged["stop_id"] == stop_id)
-            & (merged["route_short_name"] == route_id)
-            & (merged["service_id"].isin(active_services))
+        direction_str: str | None = (
+            str(direction_id) if direction_id is not None else None
         )
 
-        if direction_id is not None:
-            mask &= merged["direction_id"] == str(direction_id)
+        results: list[tuple[str, str, str | None]] = []
+        for trip_id, departure_time_raw, dep_direction_id, agency_id in candidates:
+            trip_info = self._trips_by_id.get(trip_id)
+            if trip_info is None:
+                continue
+            if trip_info["service_id"] not in active_services:
+                continue
+            if direction_str is not None and dep_direction_id != direction_str:
+                continue
+            if operator_id is not None and agency_id != operator_id:
+                continue
+            time_hhmm = self._normalise_time(departure_time_raw)
+            results.append((trip_id, time_hhmm, route_id))
 
-        if operator_id is not None:
-            mask &= merged["agency_id"] == operator_id
-
-        filtered = merged.loc[mask].copy()
-
-        if filtered.empty:
-            return []
-
-        filtered["_time_hhmm"] = filtered["departure_time"].apply(self._normalise_time)
-
-        filtered.sort_values("_time_hhmm", inplace=True)
-
-        return [
-            (
-                str(row["trip_id"]),
-                row["_time_hhmm"],
-                str(row["route_short_name"])
-                if pd.notna(row["route_short_name"])
-                else None,
-            )
-            for _, row in filtered.iterrows()
-        ]
+        results.sort(key=lambda t: t[1])
+        return results
 
     async def async_refresh_if_stale(self) -> None:
         """Reload static GTFS data if the cache is absent or older than 24 hours.
