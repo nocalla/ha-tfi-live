@@ -8,7 +8,7 @@ Each test is self-contained.  The coordinator and static cache are replaced
 by lightweight ``MagicMock`` instances; no live HA instance is required.
 """
 
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from unittest.mock import MagicMock
 
 import pytest
@@ -39,9 +39,10 @@ def mock_coordinator():
     """Return a minimal mocked coordinator with healthy defaults."""
     coord = MagicMock()
     coord.last_update_success = True
-    coord.last_successful_fetch = datetime.now()
+    coord.last_successful_fetch = datetime.now(UTC)
     coord.data = {"entities": []}
     coord._cache = MagicMock()
+    coord.cache = coord._cache
     coord._cache.get_scheduled_departures.return_value = []
     return coord
 
@@ -404,7 +405,7 @@ def test_static_unavailable_graceful(mock_coordinator, sensor_config):
 def test_unavailable_when_fetch_old(mock_coordinator, sensor_config):
     """available is False when _last_successful_fetch > 3 minutes ago (AC 11)."""
     # Arrange — last fetch was 200 seconds ago (> 180 s window)
-    mock_coordinator.last_successful_fetch = datetime.now() - timedelta(seconds=200)
+    mock_coordinator.last_successful_fetch = datetime.now(UTC) - timedelta(seconds=200)
     s = TfiLiveSensor(mock_coordinator, sensor_config, "entry_123")
 
     # Assert
@@ -419,7 +420,7 @@ def test_unavailable_when_fetch_old(mock_coordinator, sensor_config):
 def test_attributes_all_none_when_unavailable(mock_coordinator, sensor_config):
     """When unavailable, all extra_state_attributes values are None (AC 12)."""
     # Arrange
-    mock_coordinator.last_successful_fetch = datetime.now() - timedelta(seconds=200)
+    mock_coordinator.last_successful_fetch = datetime.now(UTC) - timedelta(seconds=200)
     s = TfiLiveSensor(mock_coordinator, sensor_config, "entry_123")
 
     # Act
@@ -440,7 +441,7 @@ def test_attributes_all_none_when_unavailable(mock_coordinator, sensor_config):
 def test_available_when_fetch_recent(mock_coordinator, sensor_config):
     """available is True when _last_successful_fetch is within 3 minutes (AC 13)."""
     # Arrange — just updated
-    mock_coordinator.last_successful_fetch = datetime.now()
+    mock_coordinator.last_successful_fetch = datetime.now(UTC)
     s = TfiLiveSensor(mock_coordinator, sensor_config, "entry_123")
 
     # Assert
@@ -487,7 +488,7 @@ def test_last_updated_iso8601(mock_coordinator, sensor_config):
     ``datetime.fromisoformat`` and confirming the date portion is correct.
     """
     # Arrange — use a timestamp that keeps the sensor available (<180 s ago)
-    fetch_time = datetime.now() - timedelta(seconds=10)
+    fetch_time = datetime.now(UTC) - timedelta(seconds=10)
     mock_coordinator.last_successful_fetch = fetch_time
     s = TfiLiveSensor(mock_coordinator, sensor_config, "entry_123")
 
@@ -854,6 +855,7 @@ async def test_sensor_async_setup_entry_registers_entities() -> None:
     coord._last_successful_fetch = None
     coord.data = {"entities": []}
     coord._cache = MagicMock()
+    coord.cache = coord._cache
     coord._cache.get_scheduled_departures.return_value = []
 
     entry = MagicMock()
