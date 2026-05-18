@@ -237,7 +237,7 @@ async def test_step2_empty_stop_id_returns_error(flow: TfiLiveConfigFlow) -> Non
 
 
 async def test_step2_empty_route_id_returns_error(flow: TfiLiveConfigFlow) -> None:
-    """AC 21: step 2 with route_id='' returns FORM and errors['route_id']=='required'."""
+    """AC 21: step 2 with route_id='' returns FORM and errors['route_id']=='required'."""  # noqa: E501
     # Arrange
     flow._config = dict(_PREFILLED_CONFIG, **{CONF_SENSORS: []})
     user_input = {**VALID_STEP2, CONF_ROUTE_ID: ""}
