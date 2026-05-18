@@ -8,9 +8,8 @@ are made.  Each test maps to one or more acceptance criteria from
 from __future__ import annotations
 
 import json
-from contextlib import asynccontextmanager
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import aiohttp
 import pytest

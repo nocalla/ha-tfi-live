@@ -230,7 +230,7 @@ async def test_async_load_success_sets_available_true() -> None:
 
 
 async def test_async_load_success_sets_loaded_at_utc_aware() -> None:
-    """AC 11: async_load with a valid GTFS zip sets loaded_at as a UTC-aware datetime."""
+    """AC 11: async_load with a valid GTFS zip sets loaded_at as UTC-aware datetime."""
     # Arrange
     zip_bytes = _make_gtfs_zip()
     session = _make_session(status=200, body=zip_bytes)
@@ -304,7 +304,7 @@ async def test_async_load_refresh_failure_preserves_available_true() -> None:
 
 
 async def test_async_load_refresh_failure_preserves_existing_departure_data() -> None:
-    """AC 13: Departure data from a successful load is still returned after refresh failure."""
+    """AC 13: Departure data from a prior load is preserved after a failed refresh."""
     # Arrange
     zip_bytes = _make_gtfs_zip()
     session_ok = _make_session(status=200, body=zip_bytes)
@@ -527,7 +527,7 @@ async def test_operator_filter_returns_only_matching_agency() -> None:
 
 
 async def test_date_filter_weekday_only_service_returns_empty_on_sunday() -> None:
-    """AC 19: Service running only on weekdays returns [] when target_date is a Sunday."""
+    """AC 19: Weekday-only service returns [] when target_date is a Sunday."""
     # Arrange — Saturday=0, Sunday=0 in weekday flags
     zip_bytes = _make_gtfs_zip(weekday_flags="1,1,1,1,1,0,0")
     session = _make_session(status=200, body=zip_bytes)
@@ -586,7 +586,7 @@ async def test_async_refresh_if_stale_calls_load_when_never_loaded() -> None:
 
 
 async def test_async_refresh_if_stale_calls_load_when_cache_stale() -> None:
-    """async_refresh_if_stale calls async_load when loaded_at is older than refresh_hours."""
+    """async_refresh_if_stale calls async_load when loaded_at exceeds refresh_hours."""
     # Arrange
     zip_bytes = _make_gtfs_zip()
     session = _make_session(status=200, body=zip_bytes)
@@ -657,7 +657,7 @@ async def test_calendar_dates_exception_type_1_adds_service() -> None:
     """exception_type=1 in calendar_dates adds a service for the specified date."""
     # Arrange — calendar has sunday=0, but calendar_dates adds it on the target Sunday
     target_sunday = _SUNDAY  # 2026-05-17
-    calendar_dates_csv = f"service_id,date,exception_type\nSVC1,20260517,1\n"
+    calendar_dates_csv = "service_id,date,exception_type\nSVC1,20260517,1\n"
 
     zip_bytes = _make_gtfs_zip(
         weekday_flags="1,1,1,1,1,1,0",  # Sunday not active in calendar
@@ -688,7 +688,7 @@ async def test_calendar_dates_exception_type_2_removes_service() -> None:
     """exception_type=2 in calendar_dates removes a normally-active service."""
     # Arrange — Monday is active in the calendar but removed via exception_type=2
     target_monday = _MONDAY  # 2026-05-18
-    calendar_dates_csv = f"service_id,date,exception_type\nSVC1,20260518,2\n"
+    calendar_dates_csv = "service_id,date,exception_type\nSVC1,20260518,2\n"
 
     zip_bytes = _make_gtfs_zip(
         weekday_flags="1,1,1,1,1,1,1",  # All days active in calendar
@@ -743,17 +743,15 @@ async def test_departure_time_25_30_00_normalises_to_01_30() -> None:
 
 
 async def test_results_sorted_ascending_by_departure_time() -> None:
-    """get_scheduled_departures returns results sorted ascending by HH:MM departure_time."""
+    """get_scheduled_departures returns results sorted ascending by departure_time."""
     # Arrange — stop_times deliberately out of order: 09:00, 08:00, 10:00
-    extra_trips = "TX,R1,SVC1,0\nTY,R1,SVC1,0\n"
-    # Overwrite the default baseline trips by adding extra to create un-sorted input.
     # Use a fresh zip with only the three explicit times for a clean sort test.
     routes_csv = f"route_id,route_short_name,agency_id\nR1,{_ROUTE_46A},{_AGENCY_BUS}\n"
     trips_csv = (
         "trip_id,route_id,service_id,direction_id\n"
-        f"TA,R1,SVC1,0\n"
-        f"TB,R1,SVC1,0\n"
-        f"TC,R1,SVC1,0\n"
+        "TA,R1,SVC1,0\n"
+        "TB,R1,SVC1,0\n"
+        "TC,R1,SVC1,0\n"
     )
     stop_times_csv = (
         "trip_id,stop_id,departure_time,stop_sequence\n"
@@ -859,8 +857,6 @@ async def test_loaded_at_unchanged_after_stale_refresh_failure() -> None:
     session_ok = _make_session(status=200, body=zip_bytes)
     client = StaticGtfsClient(_DUMMY_URL, session_ok)
     await client.async_load()
-
-    original_loaded_at = client.loaded_at
 
     # Act — trigger a failing refresh
     client._session = _make_session(status=503, body=b"")

@@ -6,10 +6,15 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from nta_gtfs import GtfsRtClient, StaticGtfsClient, StaticGtfsLoadError
 
-from .const import CONF_STATIC_GTFS_URL
+from .const import (
+    CONF_API_KEY,
+    CONF_STATIC_GTFS_URL,
+    CONF_TRIP_UPDATE_URL,
+    STATIC_GTFS_REFRESH_HOURS,
+)
 from .coordinator import TfiLiveCoordinator
-from .static_gtfs import StaticGtfsCache
 
 _logger = logging.getLogger(__name__)
 
@@ -37,20 +42,29 @@ async def async_setup_entry(hass: HomeAssistant, entry: TfiLiveConfigEntry) -> b
         ConfigEntryNotReady: Propagated from the first coordinator refresh when
             the feed is temporarily unavailable.
     """
-    cache = StaticGtfsCache(
+    session = async_get_clientsession(hass)
+
+    cache = StaticGtfsClient(
         static_gtfs_url=entry.data[CONF_STATIC_GTFS_URL],
-        session=async_get_clientsession(hass),
+        session=session,
+        refresh_hours=STATIC_GTFS_REFRESH_HOURS,
+    )
+
+    rt_client = GtfsRtClient(
+        feed_url=entry.data[CONF_TRIP_UPDATE_URL],
+        api_key=entry.data[CONF_API_KEY],
+        session=session,
     )
 
     try:
         await cache.async_load()
-    except Exception:  # noqa: BLE001
+    except StaticGtfsLoadError:
         _logger.warning(
             "Static GTFS load failed -- route names will be unavailable until the"
             " next successful load"
         )
 
-    coordinator = TfiLiveCoordinator(hass, entry, cache)
+    coordinator = TfiLiveCoordinator(hass, entry, rt_client, cache)
     await coordinator.async_config_entry_first_refresh()
 
     entry.runtime_data = coordinator
