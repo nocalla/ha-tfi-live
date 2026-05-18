@@ -36,6 +36,8 @@ _DUBLIN_TZ = ZoneInfo("Europe/Dublin")
 # Departures up to this many minutes past their effective time are still shown.
 _GRACE_MINUTES = 5
 
+PARALLEL_UPDATES = 1
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
