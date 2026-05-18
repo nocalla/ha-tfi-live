@@ -1,5 +1,11 @@
 # TFI Live
 
+[![CI](https://github.com/nocalla/tfi_live_ha/actions/workflows/ci.yml/badge.svg)](https://github.com/nocalla/tfi_live_ha/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/badge/coverage-96%25-brightgreen)](https://github.com/nocalla/tfi_live_ha)
+[![Version](https://img.shields.io/badge/version-0.1.0-blue)](https://github.com/nocalla/tfi_live_ha/releases)
+[![HACS: Custom](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://hacs.xyz)
+[![HA: 2024.1+](https://img.shields.io/badge/Home%20Assistant-2024.1%2B-41bdf5.svg)](https://www.home-assistant.io)
+
 A Home Assistant custom integration for real-time Irish public transport departure information, powered by the National Transport Authority (NTA) GTFS-RT feed.
 
 Each configured sensor reports the minutes to the next departure for a given stop and route, with up to three upcoming departures available as attributes. The sensor state is an integer suitable for use in automations (e.g. "leave when the next bus is 8 minutes away").
