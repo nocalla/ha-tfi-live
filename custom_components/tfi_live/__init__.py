@@ -7,20 +7,22 @@ from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .const import CONF_STATIC_GTFS_URL, DOMAIN
+from .const import CONF_STATIC_GTFS_URL
 from .coordinator import TfiLiveCoordinator
 from .static_gtfs import StaticGtfsCache
 
 _logger = logging.getLogger(__name__)
 
+type TfiLiveConfigEntry = ConfigEntry[TfiLiveCoordinator]
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+
+async def async_setup_entry(hass: HomeAssistant, entry: TfiLiveConfigEntry) -> bool:
     """Set up TFI Live from a config entry.
 
-    Creates the static GTFS cache and coordinator, registers the coordinator
-    on ``hass.data``, and forwards setup to the sensor platform.  Static GTFS
-    load failures are logged and swallowed — the integration continues without
-    static schedule data rather than blocking setup entirely (AC 10).
+    Creates the static GTFS cache and coordinator, stores the coordinator on
+    ``entry.runtime_data``, and forwards setup to the sensor platform.  Static
+    GTFS load failures are logged and swallowed — the integration continues
+    without static schedule data rather than blocking setup entirely (AC 10).
 
     Args:
         hass: The Home Assistant instance.
@@ -51,18 +53,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = TfiLiveCoordinator(hass, entry, cache)
     await coordinator.async_config_entry_first_refresh()
 
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+    entry.runtime_data = coordinator
 
     await hass.config_entries.async_forward_entry_setups(entry, [Platform.SENSOR])
 
     return True
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_unload_entry(hass: HomeAssistant, entry: TfiLiveConfigEntry) -> bool:
     """Unload a TFI Live config entry.
 
-    Unloads all forwarded platforms and removes the coordinator from
-    ``hass.data``.
+    Unloads all forwarded platforms.  The coordinator stored on
+    ``entry.runtime_data`` is cleaned up automatically by Home Assistant.
 
     Args:
         hass: The Home Assistant instance.
@@ -71,11 +73,4 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     Returns:
         True when all platforms unloaded successfully, False otherwise.
     """
-    unloaded = await hass.config_entries.async_unload_platforms(
-        entry, [Platform.SENSOR]
-    )
-
-    if unloaded:
-        hass.data[DOMAIN].pop(entry.entry_id, None)
-
-    return unloaded
+    return await hass.config_entries.async_unload_platforms(entry, [Platform.SENSOR])
