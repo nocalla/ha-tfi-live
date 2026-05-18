@@ -40,3 +40,4 @@ addopts = "-p no:homeassistant --cov=custom_components/tfi_live --cov-fail-under
 [tool.mypy]
 strict = true
 ignore_missing_imports = true
+namespace_packages = false

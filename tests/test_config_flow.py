@@ -276,6 +276,7 @@ async def test_step1_invalid_auth(flow: TfiLiveConfigFlow) -> None:
 
 async def test_step1_cannot_connect(flow: TfiLiveConfigFlow) -> None:
     """Issue #27: step 1 probe raising ClientError re-shows form with cannot_connect."""
+
     # Arrange — simulate a connection error from the probe
     @asynccontextmanager
     async def _raising_get(*args: object, **kwargs: object):  # type: ignore[no-untyped-def]
@@ -1053,3 +1054,97 @@ async def test_options_flow_add_another_loops(
 
     assert result["type"] == FlowResultType.FORM
     assert result["step_id"] == "sensor"
+
+
+async def test_options_flow_direction_id_invalid(
+    options_flow: TfiLiveOptionsFlowHandler,
+) -> None:
+    """Issue #34: options flow direction_id='2' returns invalid_direction error."""
+    result = await options_flow.async_step_sensor(
+        {
+            "name": "Bus",
+            CONF_STOP_ID: "S1",
+            CONF_ROUTE_ID: "46A",
+            CONF_DIRECTION_ID: "2",
+            "operator_id": "",
+        }
+    )
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["errors"].get(CONF_DIRECTION_ID) == "invalid_direction"
+
+
+async def test_options_flow_direction_id_non_integer(
+    options_flow: TfiLiveOptionsFlowHandler,
+) -> None:
+    """Issue #34: options flow direction_id='abc' returns invalid_direction error."""
+    result = await options_flow.async_step_sensor(
+        {
+            "name": "Bus",
+            CONF_STOP_ID: "S1",
+            CONF_ROUTE_ID: "46A",
+            CONF_DIRECTION_ID: "abc",
+            "operator_id": "",
+        }
+    )
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["errors"].get(CONF_DIRECTION_ID) == "invalid_direction"
+
+
+async def test_reconfigure_empty_api_key_returns_error(mock_hass: MagicMock) -> None:
+    """Issue #34: reconfigure with empty api_key re-shows form with required error."""
+    flow, _ = _make_flow_with_reconfigure_entry(mock_hass)
+
+    result = await flow.async_step_reconfigure(
+        {
+            CONF_API_KEY: "",
+            CONF_TRIP_UPDATE_URL: "https://new.example.com",
+            CONF_STATIC_GTFS_URL: "https://newgtfs.example.com",
+        }
+    )
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["errors"].get(CONF_API_KEY) == "required"
+
+
+async def test_reconfigure_invalid_trip_url_returns_error(mock_hass: MagicMock) -> None:
+    """Issue #34: reconfigure with bad trip_update_url returns invalid_url error."""
+    flow, _ = _make_flow_with_reconfigure_entry(mock_hass)
+
+    result = await flow.async_step_reconfigure(
+        {
+            CONF_API_KEY: "new-key",
+            CONF_TRIP_UPDATE_URL: "not-a-url",
+            CONF_STATIC_GTFS_URL: "https://newgtfs.example.com",
+        }
+    )
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["errors"].get(CONF_TRIP_UPDATE_URL) == "invalid_url"
+
+
+async def test_reconfigure_invalid_static_url_returns_error(
+    mock_hass: MagicMock,
+) -> None:
+    """Issue #34: reconfigure with bad static_gtfs_url returns invalid_url error."""
+    flow, _ = _make_flow_with_reconfigure_entry(mock_hass)
+
+    result = await flow.async_step_reconfigure(
+        {
+            CONF_API_KEY: "new-key",
+            CONF_TRIP_UPDATE_URL: "https://new.example.com",
+            CONF_STATIC_GTFS_URL: "not-a-url",
+        }
+    )
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["errors"].get(CONF_STATIC_GTFS_URL) == "invalid_url"
+
+
+def test_async_get_options_flow_returns_handler() -> None:
+    """Issue #34: async_get_options_flow returns a TfiLiveOptionsFlowHandler."""
+    mock_entry = MagicMock()
+    handler = TfiLiveConfigFlow.async_get_options_flow(mock_entry)
+
+    assert isinstance(handler, TfiLiveOptionsFlowHandler)
