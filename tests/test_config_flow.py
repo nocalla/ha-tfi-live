@@ -5,6 +5,9 @@ required field validation), AC 20 (step 1 URL validation), AC 21 (step 2
 required field validation), AC 22 (step 2 direction_id validation), and
 AC 23 (repeated sensor addition).
 
+Also covers issue #27 (API probe during step 1), issue #34 (reconfigure flow
+and options flow).
+
 All tests use pytest-asyncio (asyncio_mode = "auto") and unittest.mock only.
 No live network calls are made; any HTTP call attempted in the flow raises an
 AssertionError via a sentinel patch so the test fails loudly if the production
@@ -13,12 +16,17 @@ code ever regresses on the no-network constraint.
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import aiohttp
 import pytest
 from homeassistant.data_entry_flow import AbortFlow, FlowResultType
 
-from custom_components.tfi_live.config_flow import TfiLiveConfigFlow
+from custom_components.tfi_live.config_flow import (
+    TfiLiveConfigFlow,
+    TfiLiveOptionsFlowHandler,
+)
 from custom_components.tfi_live.const import (
     CONF_API_KEY,
     CONF_DIRECTION_ID,
@@ -186,10 +194,39 @@ async def test_step1_invalid_static_url(flow: TfiLiveConfigFlow) -> None:
     assert result["errors"][CONF_STATIC_GTFS_URL] == "invalid_url"
 
 
+def _make_mock_session(status: int = 200) -> MagicMock:
+    """Build a mock aiohttp ClientSession whose GET returns the given HTTP status.
+
+    Args:
+        status: The HTTP status code the mock response should return.
+
+    Returns:
+        A MagicMock that replaces ``async_get_clientsession`` and whose
+        ``session.get(...)`` async-context-manager yields a response with
+        ``resp.status == status``.
+    """
+    mock_resp = MagicMock()
+    mock_resp.status = status
+
+    @asynccontextmanager
+    async def _get(*args: object, **kwargs: object):  # type: ignore[no-untyped-def]
+        """Async context manager yielding the mock response."""
+        yield mock_resp
+
+    mock_session = MagicMock()
+    mock_session.get = _get
+    return mock_session
+
+
 async def test_step1_valid_advances_to_sensor(flow: TfiLiveConfigFlow) -> None:
     """AC 19/20: valid step 1 input advances to the sensor form (step_id='sensor')."""
-    # Arrange / Act
-    result = await flow.async_step_user(VALID_STEP1)
+    # Arrange — mock the probe so no real HTTP call is made
+    mock_session = _make_mock_session(status=200)
+    with patch(
+        "custom_components.tfi_live.config_flow.async_get_clientsession",
+        return_value=mock_session,
+    ):
+        result = await flow.async_step_user(VALID_STEP1)
 
     # Assert — step 1 calls async_step_sensor(None) which shows the sensor form
     assert result["type"] == FlowResultType.FORM
@@ -197,21 +234,80 @@ async def test_step1_valid_advances_to_sensor(flow: TfiLiveConfigFlow) -> None:
 
 
 async def test_step1_no_network_call(flow: TfiLiveConfigFlow) -> None:
-    """AC 19/20: step 1 must not make any HTTP calls regardless of input validity."""
+    """AC 19/20: step 1 with validation errors must not make any HTTP calls."""
 
     def _raise(*args: object, **kwargs: object) -> None:
         raise AssertionError("HTTP call made during config flow step 1")
 
     # Patch both aiohttp.ClientSession and the stdlib urllib.request to catch
-    # any network attempt.
+    # any network attempt.  Use invalid input so the flow stops at validation
+    # before reaching the probe.
     with (
         patch("aiohttp.ClientSession", side_effect=_raise),
         patch("urllib.request.urlopen", side_effect=_raise),
     ):
-        # Should not raise — valid input triggers the sensor sub-step.
+        # Invalid URL — should not reach the probe.
+        result = await flow.async_step_user(
+            {**VALID_STEP1, CONF_TRIP_UPDATE_URL: "not-a-url"}
+        )
+
+    assert result["type"] == FlowResultType.FORM
+
+
+# ---------------------------------------------------------------------------
+# Issue #27 — API probe during step 1
+# ---------------------------------------------------------------------------
+
+
+async def test_step1_invalid_auth(flow: TfiLiveConfigFlow) -> None:
+    """Issue #27: step 1 probe returning 401 re-shows form with invalid_auth error."""
+    # Arrange
+    mock_session = _make_mock_session(status=401)
+    with patch(
+        "custom_components.tfi_live.config_flow.async_get_clientsession",
+        return_value=mock_session,
+    ):
         result = await flow.async_step_user(VALID_STEP1)
 
-    assert result["type"] in (FlowResultType.FORM, FlowResultType.MENU)
+    # Assert
+    assert result["type"] == FlowResultType.FORM
+    assert result["errors"].get("base") == "invalid_auth"
+
+
+async def test_step1_cannot_connect(flow: TfiLiveConfigFlow) -> None:
+    """Issue #27: step 1 probe raising ClientError re-shows form with cannot_connect."""
+    # Arrange — simulate a connection error from the probe
+    @asynccontextmanager
+    async def _raising_get(*args: object, **kwargs: object):  # type: ignore[no-untyped-def]
+        """Async context manager that raises aiohttp.ClientError."""
+        raise aiohttp.ClientError("connection refused")
+        yield  # make it a generator
+
+    mock_session = MagicMock()
+    mock_session.get = _raising_get
+
+    with patch(
+        "custom_components.tfi_live.config_flow.async_get_clientsession",
+        return_value=mock_session,
+    ):
+        result = await flow.async_step_user(VALID_STEP1)
+
+    # Assert
+    assert result["type"] == FlowResultType.FORM
+    assert result["errors"].get("base") == "cannot_connect"
+
+
+async def test_step1_http_500_returns_cannot_connect(flow: TfiLiveConfigFlow) -> None:
+    """Issue #27: step 1 probe returning 5xx re-shows form with cannot_connect."""
+    mock_session = _make_mock_session(status=500)
+    with patch(
+        "custom_components.tfi_live.config_flow.async_get_clientsession",
+        return_value=mock_session,
+    ):
+        result = await flow.async_step_user(VALID_STEP1)
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["errors"].get("base") == "cannot_connect"
 
 
 # ---------------------------------------------------------------------------
@@ -717,3 +813,243 @@ async def test_step1_aborts_when_already_configured(flow: TfiLiveConfigFlow) -> 
 
     # Assert — the abort reason is "already_configured"
     assert exc_info.value.reason == "already_configured"
+
+
+# ---------------------------------------------------------------------------
+# Issue #34 — reconfigure flow
+# ---------------------------------------------------------------------------
+
+
+def _make_flow_with_reconfigure_entry(
+    mock_hass: MagicMock,
+) -> tuple[TfiLiveConfigFlow, MagicMock]:
+    """Return a configured flow and mock entry for reconfigure tests.
+
+    Args:
+        mock_hass: A mock hass instance from the ``mock_hass`` fixture.
+
+    Returns:
+        A tuple of (flow, mock_entry) where the flow has been wired up with
+        base-class stubs and a reconfigure entry.
+    """
+    existing_data = {
+        CONF_API_KEY: "old-key",
+        CONF_TRIP_UPDATE_URL: "https://old.example.com",
+        CONF_STATIC_GTFS_URL: "https://gtfs.example.com",
+        CONF_SENSORS: [{"name": "Existing sensor"}],
+    }
+    mock_entry = MagicMock()
+    mock_entry.data = existing_data
+    mock_entry.entry_id = "reconfigure_entry"
+
+    f = TfiLiveConfigFlow()
+    f.hass = mock_hass
+    f.context = {"entry_id": "reconfigure_entry", "source": "reconfigure"}
+
+    f.async_show_form = lambda **kwargs: {
+        "type": FlowResultType.FORM,
+        "step_id": kwargs.get("step_id"),
+        "errors": kwargs.get("errors", {}),
+        "data_schema": kwargs.get("data_schema"),
+    }
+    f.async_update_reload_and_abort = lambda entry, data, reason: {
+        "type": FlowResultType.ABORT,
+        "reason": reason,
+        "_updated_data": data,
+    }
+
+    f._get_reconfigure_entry = lambda: mock_entry  # type: ignore[method-assign]
+
+    return f, mock_entry
+
+
+async def test_reconfigure_happy_path(mock_hass: MagicMock) -> None:
+    """Issue #34: reconfigure updates credentials and preserves sensor list."""
+    flow, mock_entry = _make_flow_with_reconfigure_entry(mock_hass)
+
+    new_input = {
+        CONF_API_KEY: "new-key",
+        CONF_TRIP_UPDATE_URL: "https://new.example.com",
+        CONF_STATIC_GTFS_URL: "https://newgtfs.example.com",
+    }
+    mock_session = _make_mock_session(status=200)
+    with patch(
+        "custom_components.tfi_live.config_flow.async_get_clientsession",
+        return_value=mock_session,
+    ):
+        result = await flow.async_step_reconfigure(new_input)
+
+    assert result["type"] == FlowResultType.ABORT
+    assert result["reason"] == "reconfigure_successful"
+    updated = result["_updated_data"]
+    assert updated[CONF_API_KEY] == "new-key"
+    assert updated[CONF_TRIP_UPDATE_URL] == "https://new.example.com"
+    assert updated[CONF_STATIC_GTFS_URL] == "https://newgtfs.example.com"
+    # Sensor list from existing entry is preserved
+    assert updated[CONF_SENSORS] == [{"name": "Existing sensor"}]
+
+
+async def test_reconfigure_invalid_auth(mock_hass: MagicMock) -> None:
+    """Issue #34: reconfigure with 401 re-shows form with invalid_auth error."""
+    flow, _ = _make_flow_with_reconfigure_entry(mock_hass)
+
+    new_input = {
+        CONF_API_KEY: "bad-key",
+        CONF_TRIP_UPDATE_URL: "https://new.example.com",
+        CONF_STATIC_GTFS_URL: "https://newgtfs.example.com",
+    }
+    mock_session = _make_mock_session(status=401)
+    with patch(
+        "custom_components.tfi_live.config_flow.async_get_clientsession",
+        return_value=mock_session,
+    ):
+        result = await flow.async_step_reconfigure(new_input)
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["errors"].get("base") == "invalid_auth"
+
+
+async def test_reconfigure_initial_render_prefills_entry_data(
+    mock_hass: MagicMock,
+) -> None:
+    """Issue #34: reconfigure initial render shows form prefilled with entry data."""
+    flow, mock_entry = _make_flow_with_reconfigure_entry(mock_hass)
+
+    result = await flow.async_step_reconfigure(None)
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "reconfigure"
+    assert result["errors"] == {}
+    # Verify the schema defaults match the existing entry
+    schema = result["data_schema"]
+    assert schema is not None
+    for key in schema.schema:
+        if str(key) == CONF_API_KEY:
+            assert key.default() == mock_entry.data[CONF_API_KEY]
+        if str(key) == CONF_TRIP_UPDATE_URL:
+            assert key.default() == mock_entry.data[CONF_TRIP_UPDATE_URL]
+
+
+# ---------------------------------------------------------------------------
+# Issue #34 — options flow
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def options_flow(mock_hass: MagicMock) -> TfiLiveOptionsFlowHandler:
+    """Return a TfiLiveOptionsFlowHandler wired up with stub base-class methods.
+
+    Args:
+        mock_hass: A mock hass instance.
+
+    Returns:
+        A :class:`TfiLiveOptionsFlowHandler` with stubbed HA base-class methods
+        and a mock ``config_entry`` containing an empty sensor list.
+    """
+    existing_data = {
+        CONF_API_KEY: "k",
+        CONF_TRIP_UPDATE_URL: "https://a.com",
+        CONF_STATIC_GTFS_URL: "https://b.com",
+        CONF_SENSORS: [],
+    }
+    mock_entry = MagicMock()
+    mock_entry.data = existing_data
+    mock_entry.domain = "tfi_live"
+
+    # config_entry is a read-only property on OptionsFlow that calls
+    # hass.config_entries.async_get_known_entry(handler).  Wire up the mock
+    # so that call returns our mock entry.
+    mock_hass.config_entries.async_get_known_entry = MagicMock(return_value=mock_entry)
+
+    handler = TfiLiveOptionsFlowHandler()
+    handler.hass = mock_hass
+    # handler is the "entry_id" used by the property
+    handler.handler = mock_entry.entry_id  # type: ignore[assignment]
+
+    handler.async_show_form = lambda **kwargs: {  # type: ignore[method-assign]
+        "type": FlowResultType.FORM,
+        "step_id": kwargs.get("step_id"),
+        "errors": kwargs.get("errors", {}),
+        "data_schema": kwargs.get("data_schema"),
+    }
+    handler.async_show_menu = lambda **kwargs: {  # type: ignore[method-assign]
+        "type": FlowResultType.MENU,
+        "step_id": kwargs.get("step_id"),
+        "menu_options": kwargs.get("menu_options", []),
+    }
+    handler.async_create_entry = lambda title, data: {  # type: ignore[method-assign]
+        "type": FlowResultType.CREATE_ENTRY,
+        "title": title,
+        "data": data,
+    }
+
+    return handler
+
+
+async def test_options_flow_init_shows_sensor_form(
+    options_flow: TfiLiveOptionsFlowHandler,
+) -> None:
+    """Issue #34: options flow init delegates to the sensor form."""
+    result = await options_flow.async_step_init()
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "sensor"
+
+
+async def test_options_flow_adding_sensor_appends_to_entry_data(
+    options_flow: TfiLiveOptionsFlowHandler,
+    mock_hass: MagicMock,
+) -> None:
+    """Issue #34: adding a sensor via options flow appends it to entry data."""
+    # Pre-populate an existing sensor in the mock entry returned by config_entry
+    existing_data_with_sensor = {
+        CONF_API_KEY: "k",
+        CONF_TRIP_UPDATE_URL: "https://a.com",
+        CONF_STATIC_GTFS_URL: "https://b.com",
+        CONF_SENSORS: [{"name": "Existing", CONF_STOP_ID: "S1", CONF_ROUTE_ID: "R1"}],
+    }
+    mock_hass.config_entries.async_get_known_entry.return_value.data = (
+        existing_data_with_sensor
+    )
+
+    # Submit a valid new sensor
+    await options_flow.async_step_sensor({**VALID_STEP2, "name": "New Sensor"})
+
+    # Finish the options flow
+    result = await options_flow.async_step_finish()
+
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    sensors = result["data"][CONF_SENSORS]
+    assert len(sensors) == 2
+    assert sensors[0]["name"] == "Existing"
+    assert sensors[1]["name"] == "New Sensor"
+
+
+async def test_options_flow_sensor_validation_errors(
+    options_flow: TfiLiveOptionsFlowHandler,
+) -> None:
+    """Issue #34: options flow sensor form validates required fields."""
+    result = await options_flow.async_step_sensor(
+        {
+            "name": "",
+            CONF_STOP_ID: "",
+            CONF_ROUTE_ID: "",
+            CONF_DIRECTION_ID: "",
+            "operator_id": "",
+        }
+    )
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["errors"].get("name") == "required"
+    assert result["errors"].get(CONF_STOP_ID) == "required"
+    assert result["errors"].get(CONF_ROUTE_ID) == "required"
+
+
+async def test_options_flow_add_another_loops(
+    options_flow: TfiLiveOptionsFlowHandler,
+) -> None:
+    """Issue #34: options flow add_another returns to the sensor form."""
+    result = await options_flow.async_step_add_another()
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "sensor"
