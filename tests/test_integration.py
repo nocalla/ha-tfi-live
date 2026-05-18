@@ -219,9 +219,7 @@ def _make_entry(*, sensors: list[dict] | None = None) -> MagicMock:
 # ---------------------------------------------------------------------------
 
 
-async def test_setup_entry_happy_path_stores_coordinator_and_forwards_sensor() -> (
-    None
-):
+async def test_setup_entry_happy_path_stores_coordinator_and_forwards_sensor() -> None:
     """TC-1: Valid feed + valid static GTFS → coordinator stored, sensor forwarded.
 
     Arrange: hass with empty data dict; config entry with all required keys and

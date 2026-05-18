@@ -195,9 +195,7 @@ def test_native_value_floor_negative(mock_coordinator, sensor_config):
     uses ``math.floor`` rather than truncation for the negative case.
     """
     # Arrange — departure is slightly overdue but within the 5-min grace window
-    mock_coordinator.data = {
-        "entities": [make_rt_entity("T1", minutes_from_now=-1.3)]
-    }
+    mock_coordinator.data = {"entities": [make_rt_entity("T1", minutes_from_now=-1.3)]}
     s = TfiLiveSensor(mock_coordinator, sensor_config, "entry_123")
 
     # Act
@@ -220,9 +218,7 @@ def test_native_value_overdue_negative_2(mock_coordinator, sensor_config):
     This test will fail if the implementation rounds in the wrong direction.
     """
     # Arrange — 2 min 45 sec ago = -2.75 minutes
-    mock_coordinator.data = {
-        "entities": [make_rt_entity("T1", minutes_from_now=-2.75)]
-    }
+    mock_coordinator.data = {"entities": [make_rt_entity("T1", minutes_from_now=-2.75)]}
     s = TfiLiveSensor(mock_coordinator, sensor_config, "entry_123")
 
     # Act
@@ -271,10 +267,7 @@ def test_native_value_scheduled_fallback_when_no_rt(mock_coordinator, sensor_con
 def test_departures_attribute_at_most_3(mock_coordinator, sensor_config):
     """Given 5 matching RT departures, departures has exactly 3 entries (AC 6)."""
     # Arrange — 5 RT entities each 1 min apart starting at 5 min from now
-    entities = [
-        make_rt_entity(f"T{i}", minutes_from_now=5.0 + i)
-        for i in range(1, 6)
-    ]
+    entities = [make_rt_entity(f"T{i}", minutes_from_now=5.0 + i) for i in range(1, 6)]
     mock_coordinator.data = {"entities": entities}
     s = TfiLiveSensor(mock_coordinator, sensor_config, "entry_123")
 
