@@ -150,7 +150,7 @@ class TfiLiveSensor(CoordinatorEntity[TfiLiveCoordinator], SensorEntity):
         """
         if not self.coordinator.last_update_success:
             return False
-        last_fetch = self.coordinator._last_successful_fetch
+        last_fetch = self.coordinator.last_successful_fetch
         if last_fetch is None:
             return False
         return (
@@ -219,7 +219,7 @@ class TfiLiveSensor(CoordinatorEntity[TfiLiveCoordinator], SensorEntity):
             ATTR_DIRECTION_ID: self._direction_id,
             ATTR_OPERATOR_ID: self._operator_id,
             ATTR_DEPARTURES: public_departures,
-            ATTR_LAST_UPDATED: self.coordinator._last_successful_fetch.isoformat(),
+            ATTR_LAST_UPDATED: self.coordinator.last_successful_fetch.isoformat(),
         }
 
     def _get_departures(self) -> list[dict]:
