@@ -15,7 +15,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
 import pytest
-
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
@@ -177,9 +176,7 @@ async def test_successful_fetch_returns_entities(coordinator):
     and ``direction_id == "0"`` (string, not integer).
     """
     # Arrange
-    mock_session = _make_mock_session(
-        200, body=json.dumps(VALID_PAYLOAD).encode()
-    )
+    mock_session = _make_mock_session(200, body=json.dumps(VALID_PAYLOAD).encode())
 
     # Act
     with patch(
@@ -209,9 +206,7 @@ async def test_successful_fetch_returns_entities(coordinator):
 async def test_last_successful_fetch_set_on_success(coordinator):
     """TC-3: _last_successful_fetch is a datetime after a successful fetch."""
     # Arrange
-    mock_session = _make_mock_session(
-        200, body=json.dumps(VALID_PAYLOAD).encode()
-    )
+    mock_session = _make_mock_session(200, body=json.dumps(VALID_PAYLOAD).encode())
 
     # Act
     with patch(
@@ -271,16 +266,15 @@ async def test_http_500_logs_warning_once(coordinator, caplog):
         "custom_components.tfi_live.coordinator.async_get_clientsession",
         return_value=mock_session,
     ):
-        with caplog.at_level(logging.WARNING, logger="custom_components.tfi_live.coordinator"):
+        with caplog.at_level(
+            logging.WARNING, logger="custom_components.tfi_live.coordinator"
+        ):
             for _ in range(2):
                 with pytest.raises(UpdateFailed):
                     await coordinator._async_update_data()
 
     # Assert — exactly one WARNING entry
-    warnings = [
-        r for r in caplog.records
-        if r.levelname == "WARNING"
-    ]
+    warnings = [r for r in caplog.records if r.levelname == "WARNING"]
     assert len(warnings) == 1
 
 
@@ -303,7 +297,9 @@ async def test_http_500_second_call_no_extra_log(coordinator, caplog):
         "custom_components.tfi_live.coordinator.async_get_clientsession",
         return_value=mock_session,
     ):
-        with caplog.at_level(logging.WARNING, logger="custom_components.tfi_live.coordinator"):
+        with caplog.at_level(
+            logging.WARNING, logger="custom_components.tfi_live.coordinator"
+        ):
             # First call
             with pytest.raises(UpdateFailed):
                 await coordinator._async_update_data()
@@ -356,7 +352,9 @@ async def test_http_401_logs_error_once(coordinator, caplog):
         "custom_components.tfi_live.coordinator.async_get_clientsession",
         return_value=mock_session,
     ):
-        with caplog.at_level(logging.ERROR, logger="custom_components.tfi_live.coordinator"):
+        with caplog.at_level(
+            logging.ERROR, logger="custom_components.tfi_live.coordinator"
+        ):
             with pytest.raises(ConfigEntryAuthFailed):
                 await coordinator._async_update_data()
 
@@ -398,7 +396,9 @@ async def test_bad_json_logs_error(coordinator, caplog):
         "custom_components.tfi_live.coordinator.async_get_clientsession",
         return_value=mock_session,
     ):
-        with caplog.at_level(logging.ERROR, logger="custom_components.tfi_live.coordinator"):
+        with caplog.at_level(
+            logging.ERROR, logger="custom_components.tfi_live.coordinator"
+        ):
             with pytest.raises(UpdateFailed):
                 await coordinator._async_update_data()
 
@@ -444,7 +444,9 @@ async def test_network_error_logs_warning(coordinator, caplog):
         "custom_components.tfi_live.coordinator.async_get_clientsession",
         return_value=mock_session,
     ):
-        with caplog.at_level(logging.WARNING, logger="custom_components.tfi_live.coordinator"):
+        with caplog.at_level(
+            logging.WARNING, logger="custom_components.tfi_live.coordinator"
+        ):
             with pytest.raises(UpdateFailed):
                 await coordinator._async_update_data()
 
