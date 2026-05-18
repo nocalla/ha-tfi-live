@@ -10,5 +10,6 @@
     "@nocalla"
   ],
   "documentation": "https://github.com/nocalla/tfi_live_ha",
+  "issue_tracker": "https://github.com/nocalla/tfi_live_ha/issues",
   "integration_type": "service"
 }
