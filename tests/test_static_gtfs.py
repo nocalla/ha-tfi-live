@@ -7,7 +7,7 @@ in-memory GTFS zips. No live network calls are made at any point.
 
 import io
 import zipfile
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
@@ -354,7 +354,7 @@ async def test_async_refresh_if_stale_no_reload_when_fresh() -> None:
 
     # Patch async_load so we can count subsequent calls.
     with patch.object(cache, "async_load", new_callable=AsyncMock) as mock_load:
-        cache._loaded_at = datetime.now() - timedelta(hours=1)
+        cache._loaded_at = datetime.now(UTC) - timedelta(hours=1)
         await cache.async_refresh_if_stale()
 
     mock_load.assert_not_called()
@@ -373,7 +373,7 @@ async def test_async_refresh_if_stale_reloads_when_stale() -> None:
     await cache.async_load()
 
     with patch.object(cache, "async_load", new_callable=AsyncMock) as mock_load:
-        cache._loaded_at = datetime.now() - timedelta(hours=25)
+        cache._loaded_at = datetime.now(UTC) - timedelta(hours=25)
         await cache.async_refresh_if_stale()
 
     mock_load.assert_called_once()

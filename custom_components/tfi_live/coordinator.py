@@ -2,7 +2,7 @@
 
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import aiohttp
@@ -119,7 +119,7 @@ class TfiLiveCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
             raise UpdateFailed(f"JSON parse error: {exc}") from exc
 
-        self._last_successful_fetch = datetime.now()
+        self._last_successful_fetch = datetime.now(UTC)
         self._last_error_key = None
 
         return {"entities": parsed_entities}
@@ -133,6 +133,16 @@ class TfiLiveCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             completed successfully, or ``None`` if no fetch has succeeded yet.
         """
         return self._last_successful_fetch
+
+    @property
+    def cache(self) -> StaticGtfsCache:
+        """Return the shared static GTFS schedule cache.
+
+        Returns:
+            The ``StaticGtfsCache`` instance shared by all sensors for this
+            coordinator.
+        """
+        return self._cache
 
     def _log_once(
         self,

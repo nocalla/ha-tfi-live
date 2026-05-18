@@ -1,7 +1,7 @@
 """Sensor entities for the TFI Live integration."""
 
 import logging
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -39,7 +39,7 @@ _DUBLIN_TZ = ZoneInfo("Europe/Dublin")
 # Departures up to this many minutes past their effective time are still shown.
 _GRACE_MINUTES = 5
 
-PARALLEL_UPDATES = 1
+PARALLEL_UPDATES = 0
 
 
 def _now_dublin() -> datetime:
@@ -160,7 +160,7 @@ class TfiLiveSensor(CoordinatorEntity[TfiLiveCoordinator], SensorEntity):
         if last_fetch is None:
             return False
         return (
-            datetime.now() - last_fetch
+            datetime.now(UTC) - last_fetch
         ).total_seconds() <= AVAILABILITY_WINDOW_SECONDS
 
     @property
@@ -291,7 +291,7 @@ class TfiLiveSensor(CoordinatorEntity[TfiLiveCoordinator], SensorEntity):
                 break
 
         # Fetch scheduled departures from static cache.
-        static_departures = self.coordinator._cache.get_scheduled_departures(
+        static_departures = self.coordinator.cache.get_scheduled_departures(
             self._stop_id,
             self._route_id,
             self._direction_id,

@@ -4,7 +4,7 @@ import csv
 import io
 import logging
 import zipfile
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import aiohttp
 
@@ -85,7 +85,7 @@ class StaticGtfsCache:
             return
 
         self.available = True
-        self._loaded_at = datetime.now()
+        self._loaded_at = datetime.now(UTC)
         self._in_error_state = False
 
     def _handle_error(self, msg: str, *args: object) -> None:
@@ -333,7 +333,7 @@ class StaticGtfsCache:
         ``STATIC_GTFS_REFRESH_HOURS`` hours have elapsed since the last
         successful load.  Does nothing when the cache is still fresh.
         """
-        if self._loaded_at is None or (datetime.now() - self._loaded_at) > timedelta(
+        if self._loaded_at is None or (datetime.now(UTC) - self._loaded_at) > timedelta(
             hours=STATIC_GTFS_REFRESH_HOURS
         ):
             await self.async_load()
