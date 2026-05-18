@@ -623,9 +623,9 @@ def test_available_false_when_last_update_success_false(
 def test_available_false_when_last_successful_fetch_none(
     mock_coordinator, sensor_config
 ):
-    """available returns False when _last_successful_fetch is None."""
+    """available returns False when last_successful_fetch is None."""
     mock_coordinator.last_update_success = True
-    mock_coordinator._last_successful_fetch = None
+    mock_coordinator.last_successful_fetch = None
     s = TfiLiveSensor(mock_coordinator, sensor_config, "e1")
     assert s.available is False
 

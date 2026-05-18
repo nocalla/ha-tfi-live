@@ -27,6 +27,7 @@ from .const import (
     DEP_ROUTE_NAME,
     DEP_SCHEDULED_TIME,
     DEP_TRIP_ID,
+    DOMAIN,
     MAX_DEPARTURES,
 )
 from .coordinator import TfiLiveCoordinator
