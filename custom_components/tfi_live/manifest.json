@@ -7,5 +7,6 @@
   "requirements": [],
   "dependencies": [],
   "codeowners": ["@nocalla"],
-  "documentation": ""
+  "documentation": "https://github.com/nocalla/tfi_live_ha",
+  "icon": "mdi:bus-clock"
 }
