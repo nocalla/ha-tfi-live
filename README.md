@@ -1,4 +1,4 @@
-# TFI Live
+# HA TFI Live
 
 [![CI](https://github.com/nocalla/ha-tfi-live/actions/workflows/ci.yml/badge.svg)](https://github.com/nocalla/ha-tfi-live/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/badge/release-v0.2.0-blue)](https://github.com/nocalla/ha-tfi-live/releases)
