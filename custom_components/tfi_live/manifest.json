@@ -9,5 +9,6 @@
   "codeowners": [
     "@nocalla"
   ],
-  "documentation": "https://github.com/nocalla/tfi_live_ha"
+  "documentation": "https://github.com/nocalla/tfi_live_ha",
+  "integration_type": "service"
 }
