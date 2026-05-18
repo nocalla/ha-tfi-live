@@ -243,9 +243,7 @@ class TfiLiveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """
         return self.async_create_entry(title="TFI Live", data=self._config)
 
-    async def async_step_reauth(
-        self, entry_data: dict[str, Any]
-    ) -> FlowResult:
+    async def async_step_reauth(self, entry_data: dict[str, Any]) -> FlowResult:
         """Handle the start of a re-authentication flow.
 
         Called by HA when the coordinator signals that the current API key
@@ -259,9 +257,7 @@ class TfiLiveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         Returns:
             A FlowResult delegating to :meth:`async_step_reauth_confirm`.
         """
-        self._entry = self.hass.config_entries.async_get_entry(
-            self.context["entry_id"]
-        )
+        self._entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
         return await self.async_step_reauth_confirm()
 
     async def async_step_reauth_confirm(

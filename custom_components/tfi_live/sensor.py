@@ -308,9 +308,7 @@ class TfiLiveSensor(CoordinatorEntity[TfiLiveCoordinator], SensorEntity):
             if trip_id in static_by_trip:
                 sched_hhmm, route_name = static_by_trip[trip_id]
 
-            delay_minutes: int | None = (
-                round(delay / 60) if delay is not None else None
-            )
+            delay_minutes: int | None = round(delay / 60) if delay is not None else None
 
             candidates.append(
                 {

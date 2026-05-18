@@ -180,9 +180,7 @@ class StaticGtfsCache:
             col in self._calendar_dates.columns
             for col in ("service_id", "date", "exception_type")
         ):
-            exceptions = self._calendar_dates[
-                self._calendar_dates["date"] == date_str
-            ]
+            exceptions = self._calendar_dates[self._calendar_dates["date"] == date_str]
             for _, row in exceptions.iterrows():
                 if row["exception_type"] == "1":
                     active.add(row["service_id"])
@@ -273,9 +271,7 @@ class StaticGtfsCache:
         if filtered.empty:
             return []
 
-        filtered["_time_hhmm"] = filtered["departure_time"].apply(
-            self._normalise_time
-        )
+        filtered["_time_hhmm"] = filtered["departure_time"].apply(self._normalise_time)
 
         filtered.sort_values("_time_hhmm", inplace=True)
 
@@ -297,7 +293,7 @@ class StaticGtfsCache:
         ``STATIC_GTFS_REFRESH_HOURS`` hours have elapsed since the last
         successful load.  Does nothing when the cache is still fresh.
         """
-        if self._loaded_at is None or (
-            datetime.now() - self._loaded_at
-        ) > timedelta(hours=STATIC_GTFS_REFRESH_HOURS):
+        if self._loaded_at is None or (datetime.now() - self._loaded_at) > timedelta(
+            hours=STATIC_GTFS_REFRESH_HOURS
+        ):
             await self.async_load()
