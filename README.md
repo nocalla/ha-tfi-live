@@ -108,6 +108,26 @@ automation:
           message: "Next 46A in {{ states('sensor.next_46a_ranelagh') }} minutes"
 ```
 
+## Data Updates
+
+- **Real-time feed:** polled every 60 seconds from the NTA GTFS-RT endpoint.
+- **Static schedule:** downloaded at startup and refreshed every 24 hours. Route names and scheduled times are sourced from this data.
+- **Availability:** a sensor goes unavailable if no successful feed fetch has occurred within the past 3 minutes. It recovers automatically when the feed becomes reachable again.
+
+## Known Limitations
+
+- **Operator ID filter:** applies to the static schedule only. The GTFS-RT feed does not include agency information in trip updates, so the operator filter cannot be applied to real-time data.
+- **Post-midnight trips:** GTFS departure times can exceed 23:59:59 (e.g. `25:30:00` for 01:30 the next day). These are wrapped to clock time and may display unexpectedly for overnight services.
+- **Feed coverage:** only operators present in the NTA GTFS feed are supported. Private operators not in the feed will not appear regardless of configuration.
+
+## Troubleshooting
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| Sensor shows *unavailable* | Feed unreachable or API key rejected | Check the HA log for HTTP error codes; verify the API key at [developer.nationaltransport.ie](https://developer.nationaltransport.ie) |
+| No departures shown | Incorrect stop/route/direction | Cross-reference stop_id and route_id against the [NTA GTFS static data](https://www.transportforireland.ie/transitData/Data/GTFS_Realtime.zip) |
+| Re-authentication prompt | API key rejected (HTTP 401) | Go to **Settings → Integrations → TFI Live → Re-authenticate** and enter a valid key |
+
 ## Development
 
 ```bash
