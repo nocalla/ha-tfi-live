@@ -30,6 +30,9 @@ jobs:
       - name: Ruff format check
         run: uv run ruff format --check .
 
+      - name: mypy type check
+        run: uv run mypy custom_components/tfi_live
+
   test:
     name: Test
     runs-on: ubuntu-latest
