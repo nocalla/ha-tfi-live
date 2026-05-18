@@ -27,7 +27,11 @@ from custom_components.tfi_live.const import (
     DEP_SCHEDULED_TIME,
     DEP_TRIP_ID,
 )
-from custom_components.tfi_live.sensor import TfiLiveSensor, _now_dublin, _parse_hhmm_today
+from custom_components.tfi_live.sensor import (
+    TfiLiveSensor,
+    _now_dublin,
+    _parse_hhmm_today,
+)
 
 # ---------------------------------------------------------------------------
 # Fixtures
