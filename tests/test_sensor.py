@@ -27,7 +27,7 @@ from custom_components.tfi_live.const import (
     DEP_SCHEDULED_TIME,
     DEP_TRIP_ID,
 )
-from custom_components.tfi_live.sensor import TfiLiveSensor, _parse_hhmm_today
+from custom_components.tfi_live.sensor import TfiLiveSensor, _now_dublin, _parse_hhmm_today
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -241,7 +241,7 @@ def test_native_value_scheduled_fallback_when_no_rt(mock_coordinator, sensor_con
     """
     # Arrange — no RT entities; one static departure 10 min from now
     mock_coordinator.data = {"entities": []}
-    future = datetime.now() + timedelta(minutes=10)
+    future = _now_dublin() + timedelta(minutes=10)
     hhmm = future.strftime("%H:%M")
     mock_coordinator._cache.get_scheduled_departures.return_value = [
         ("TRIP_X", hhmm, "46A")
@@ -331,7 +331,7 @@ def test_departures_fewer_than_3(mock_coordinator, sensor_config):
 def test_departures_sort_order(mock_coordinator, sensor_config):
     """Departures are sorted [B-RT@5min, C-RT@8min, A-static@10min] (AC 7a)."""
     # Arrange
-    future_10 = datetime.now() + timedelta(minutes=10)
+    future_10 = _now_dublin() + timedelta(minutes=10)
     hhmm_10min = future_10.strftime("%H:%M")
 
     mock_coordinator._cache.get_scheduled_departures.return_value = [
