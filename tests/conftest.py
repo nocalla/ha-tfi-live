@@ -21,6 +21,7 @@ puts the current class (real or guarded) back.
 """
 
 import socket as _socket
+import sys
 
 _REAL_SOCKET_CLS = _socket.socket
 _REAL_SOCKETPAIR = getattr(_socket, "socketpair", None)
@@ -74,7 +75,8 @@ def _socketpair_via_real_socket(
         _socket.socket = guarded
 
 
-_socket.socketpair = _socketpair_via_real_socket  # type: ignore[assignment]
+if sys.platform == "win32":
+    _socket.socketpair = _socketpair_via_real_socket  # type: ignore[assignment]
 
 
 def pytest_configure(config):
