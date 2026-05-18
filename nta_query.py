@@ -3,7 +3,8 @@
 
 Usage:
     python nta_query.py --api-key KEY --stop-id 8220DB000836 --route-id 46A
-    python nta_query.py --api-key KEY --stop-id 8220DB000836 --route-id 46A --direction 0
+    python nta_query.py --api-key KEY --stop-id 8220DB000836 --route-id 46A \
+        --direction 0
     python nta_query.py --api-key KEY --stop-id 8220DB000836 --route-id 46A --json
 
 No Home Assistant or third-party libraries required — stdlib only.
@@ -21,6 +22,7 @@ _DUBLIN_TZ = ZoneInfo("Europe/Dublin")
 
 
 # --- Parsing logic mirrored from coordinator.py:TfiLiveCoordinator._parse_feed ---
+
 
 def _int_or_none(value: object) -> int | None:
     if value is None:
@@ -46,23 +48,28 @@ def _parse_feed(payload: dict) -> list[dict]:
         for stu in trip_update.get("stop_time_update", []):
             arrival = stu.get("arrival") or {}
             departure = stu.get("departure") or {}
-            stop_time_updates.append({
-                "stop_id": str(stu.get("stop_id", "")),
-                "arrival_delay": _int_or_none(arrival.get("delay")),
-                "departure_delay": _int_or_none(departure.get("delay")),
-                "arrival_time": _int_or_none(arrival.get("time")),
-                "departure_time": _int_or_none(departure.get("time")),
-            })
-        entities.append({
-            "trip_id": trip_id,
-            "route_id": route_id,
-            "direction_id": direction_id,
-            "stop_time_updates": stop_time_updates,
-        })
+            stop_time_updates.append(
+                {
+                    "stop_id": str(stu.get("stop_id", "")),
+                    "arrival_delay": _int_or_none(arrival.get("delay")),
+                    "departure_delay": _int_or_none(departure.get("delay")),
+                    "arrival_time": _int_or_none(arrival.get("time")),
+                    "departure_time": _int_or_none(departure.get("time")),
+                }
+            )
+        entities.append(
+            {
+                "trip_id": trip_id,
+                "route_id": route_id,
+                "direction_id": direction_id,
+                "stop_time_updates": stop_time_updates,
+            }
+        )
     return entities
 
 
 # --- Feed fetch ---
+
 
 def _fetch_feed(api_key: str) -> dict:
     req = urllib.request.Request(
@@ -74,6 +81,7 @@ def _fetch_feed(api_key: str) -> dict:
 
 
 # --- Departure filtering ---
+
 
 def _get_departures(
     entities: list[dict],
@@ -97,18 +105,21 @@ def _get_departures(
             dep_dt = datetime.fromtimestamp(unix_ts, tz=_DUBLIN_TZ)
             minutes = (dep_dt - now).total_seconds() / 60
             delay = stu["departure_delay"]
-            results.append({
-                "trip_id": entity["trip_id"],
-                "direction_id": entity["direction_id"],
-                "departure_time": dep_dt.strftime("%H:%M"),
-                "minutes_until": int(minutes),
-                "delay_minutes": round(delay / 60) if delay is not None else None,
-            })
+            results.append(
+                {
+                    "trip_id": entity["trip_id"],
+                    "direction_id": entity["direction_id"],
+                    "departure_time": dep_dt.strftime("%H:%M"),
+                    "minutes_until": int(minutes),
+                    "delay_minutes": round(delay / 60) if delay is not None else None,
+                }
+            )
     results.sort(key=lambda d: d["minutes_until"])
     return results
 
 
 # --- Output ---
+
 
 def _print_table(departures: list[dict], stop_id: str, route_id: str) -> None:
     print(f"\nRoute {route_id}  ·  Stop {stop_id}")
@@ -117,9 +128,10 @@ def _print_table(departures: list[dict], stop_id: str, route_id: str) -> None:
         print("  No upcoming departures found in the live feed.")
         return
     print(f"  {'Time':>5}  {'Min':>4}  {'Delay':>6}  {'Dir':>3}  Trip ID")
-    print(f"  {'─'*5}  {'─'*4}  {'─'*6}  {'─'*3}  {'─'*20}")
+    print(f"  {'─' * 5}  {'─' * 4}  {'─' * 6}  {'─' * 3}  {'─' * 20}")
     for dep in departures:
-        delay = f"{dep['delay_minutes']:+d}" if dep["delay_minutes"] is not None else "  n/a"
+        raw_delay = dep["delay_minutes"]
+        delay = f"{raw_delay:+d}" if raw_delay is not None else "  n/a"
         direction = dep["direction_id"] if dep["direction_id"] is not None else "  -"
         print(
             f"  {dep['departure_time']:>5}  {dep['minutes_until']:>+4}  "
@@ -130,20 +142,27 @@ def _print_table(departures: list[dict], stop_id: str, route_id: str) -> None:
 
 # --- Entry point ---
 
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Query the NTA GTFS-RT feed for upcoming departures at a stop."
     )
     parser.add_argument("--api-key", required=True, help="NTA developer portal API key")
-    parser.add_argument("--stop-id", required=True, help="GTFS stop ID (e.g. 8220DB000836)")
-    parser.add_argument("--route-id", required=True, help="Route short name (e.g. 46A, DART)")
+    parser.add_argument(
+        "--stop-id", required=True, help="GTFS stop ID (e.g. 8220DB000836)"
+    )
+    parser.add_argument(
+        "--route-id", required=True, help="Route short name (e.g. 46A, DART)"
+    )
     parser.add_argument(
         "--direction",
         choices=["0", "1"],
         default=None,
         help="Filter by GTFS direction ID (0 or 1); omit for both directions",
     )
-    parser.add_argument("--json", dest="as_json", action="store_true", help="Output raw JSON")
+    parser.add_argument(
+        "--json", dest="as_json", action="store_true", help="Output raw JSON"
+    )
     args = parser.parse_args()
 
     try:
