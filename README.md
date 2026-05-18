@@ -1,12 +1,12 @@
 # TFI Live
 
-[![CI](https://github.com/nocalla/tfi_live_ha/actions/workflows/ci.yml/badge.svg)](https://github.com/nocalla/tfi_live_ha/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/badge/release-v0.2.0-blue)](https://github.com/nocalla/tfi_live_ha/releases)
-[![License](https://img.shields.io/badge/license-MIT-green)](https://github.com/nocalla/tfi_live_ha/blob/master/LICENSE)
-[![Coverage](https://img.shields.io/badge/coverage-96%25-brightgreen)](https://github.com/nocalla/tfi_live_ha/actions/workflows/ci.yml)
+[![CI](https://github.com/nocalla/ha-tfi-live/actions/workflows/ci.yml/badge.svg)](https://github.com/nocalla/ha-tfi-live/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/badge/release-v0.2.0-blue)](https://github.com/nocalla/ha-tfi-live/releases)
+[![License](https://img.shields.io/badge/license-MIT-green)](https://github.com/nocalla/ha-tfi-live/blob/master/LICENSE)
+[![Coverage](https://img.shields.io/badge/coverage-96%25-brightgreen)](https://github.com/nocalla/ha-tfi-live/actions/workflows/ci.yml)
 [![HACS: Custom](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://hacs.xyz)
 [![HA: 2024.1+](https://img.shields.io/badge/Home%20Assistant-2024.1%2B-41bdf5.svg)](https://www.home-assistant.io)
-[![Python: 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)](https://github.com/nocalla/tfi_live_ha/blob/master/pyproject.toml)
+[![Python: 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)](https://github.com/nocalla/ha-tfi-live/blob/master/pyproject.toml)
 
 A Home Assistant custom integration for real-time Irish public transport departure information, powered by the National Transport Authority (NTA) GTFS-RT feed.
 
@@ -140,7 +140,7 @@ automation:
 
 ```bash
 # Clone and create venv
-git clone https://github.com/nocalla/tfi_live_ha.git
+git clone https://github.com/nocalla/ha-tfi-live.git
 cd tfi_live_ha
 uv sync --extra dev
 

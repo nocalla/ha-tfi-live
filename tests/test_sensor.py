@@ -14,7 +14,7 @@ from unittest.mock import MagicMock
 import pytest
 from homeassistant.components.sensor import SensorEntity
 
-from custom_components.tfi_live.const import (
+from custom_components.ha_tfi_live.const import (
     ATTR_DEPARTURES,
     ATTR_DIRECTION_ID,
     ATTR_LAST_UPDATED,
@@ -27,7 +27,7 @@ from custom_components.tfi_live.const import (
     DEP_SCHEDULED_TIME,
     DEP_TRIP_ID,
 )
-from custom_components.tfi_live.sensor import (
+from custom_components.ha_tfi_live.sensor import (
     TfiLiveSensor,
     _now_dublin,
     _parse_hhmm_today,
@@ -848,8 +848,8 @@ async def test_sensor_async_setup_entry_registers_entities() -> None:
     """
     from unittest.mock import MagicMock
 
-    from custom_components.tfi_live.const import CONF_SENSORS
-    from custom_components.tfi_live.sensor import (
+    from custom_components.ha_tfi_live.const import CONF_SENSORS
+    from custom_components.ha_tfi_live.sensor import (
         TfiLiveSensor,
         async_setup_entry,
     )

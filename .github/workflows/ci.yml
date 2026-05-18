@@ -57,7 +57,7 @@ jobs:
         run: uv run ruff check .
 
       - name: mypy type check
-        run: uv run mypy custom_components/tfi_live
+        run: uv run mypy custom_components/ha_tfi_live
 
   test:
     name: Test

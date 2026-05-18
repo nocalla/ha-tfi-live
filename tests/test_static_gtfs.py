@@ -1,4 +1,4 @@
-"""Tests for custom_components.tfi_live.static_gtfs.
+"""Tests for custom_components.ha_tfi_live.static_gtfs.
 
 Covers StaticGtfsCache.async_load(), get_scheduled_departures(), and
 async_refresh_if_stale() with fully mocked aiohttp sessions and synthetic
@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import aiohttp
 import pytest
 
-from custom_components.tfi_live.static_gtfs import StaticGtfsCache
+from custom_components.ha_tfi_live.static_gtfs import StaticGtfsCache
 
 # ---------------------------------------------------------------------------
 # Synthetic GTFS data constants
@@ -276,7 +276,7 @@ async def test_async_load_http_error_logs_once_not_twice(
     import logging
 
     with caplog.at_level(
-        logging.WARNING, logger="custom_components.tfi_live.static_gtfs"
+        logging.WARNING, logger="custom_components.ha_tfi_live.static_gtfs"
     ):
         await cache.async_load()
         await cache.async_load()
@@ -337,7 +337,7 @@ async def test_async_load_client_error_logs_warning(
     cache = StaticGtfsCache(_DUMMY_URL, session)
 
     with caplog.at_level(
-        logging.WARNING, logger="custom_components.tfi_live.static_gtfs"
+        logging.WARNING, logger="custom_components.ha_tfi_live.static_gtfs"
     ):
         await cache.async_load()
 
@@ -509,7 +509,7 @@ async def test_async_load_parse_error_logs_warning(
     cache = StaticGtfsCache(_DUMMY_URL, session)
 
     with caplog.at_level(
-        logging.WARNING, logger="custom_components.tfi_live.static_gtfs"
+        logging.WARNING, logger="custom_components.ha_tfi_live.static_gtfs"
     ):
         await cache.async_load()
 
@@ -527,7 +527,7 @@ async def test_async_load_parse_error_logs_once_not_twice(
     cache = StaticGtfsCache(_DUMMY_URL, session)
 
     with caplog.at_level(
-        logging.WARNING, logger="custom_components.tfi_live.static_gtfs"
+        logging.WARNING, logger="custom_components.ha_tfi_live.static_gtfs"
     ):
         await cache.async_load()
         await cache.async_load()

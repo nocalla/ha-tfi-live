@@ -1,4 +1,4 @@
-"""Tests for custom_components.tfi_live.config_flow.
+"""Tests for custom_components.ha_tfi_live.config_flow.
 
 Covers acceptance criteria AC 18 (re-auth preserves config), AC 19 (step 1
 required field validation), AC 20 (step 1 URL validation), AC 21 (step 2
@@ -23,11 +23,11 @@ import aiohttp
 import pytest
 from homeassistant.data_entry_flow import AbortFlow, FlowResultType
 
-from custom_components.tfi_live.config_flow import (
+from custom_components.ha_tfi_live.config_flow import (
     TfiLiveConfigFlow,
     TfiLiveOptionsFlowHandler,
 )
-from custom_components.tfi_live.const import (
+from custom_components.ha_tfi_live.const import (
     CONF_API_KEY,
     CONF_DIRECTION_ID,
     CONF_ROUTE_ID,
@@ -223,7 +223,7 @@ async def test_step1_valid_advances_to_sensor(flow: TfiLiveConfigFlow) -> None:
     # Arrange — mock the probe so no real HTTP call is made
     mock_session = _make_mock_session(status=200)
     with patch(
-        "custom_components.tfi_live.config_flow.async_get_clientsession",
+        "custom_components.ha_tfi_live.config_flow.async_get_clientsession",
         return_value=mock_session,
     ):
         result = await flow.async_step_user(VALID_STEP1)
@@ -264,7 +264,7 @@ async def test_step1_invalid_auth(flow: TfiLiveConfigFlow) -> None:
     # Arrange
     mock_session = _make_mock_session(status=401)
     with patch(
-        "custom_components.tfi_live.config_flow.async_get_clientsession",
+        "custom_components.ha_tfi_live.config_flow.async_get_clientsession",
         return_value=mock_session,
     ):
         result = await flow.async_step_user(VALID_STEP1)
@@ -288,7 +288,7 @@ async def test_step1_cannot_connect(flow: TfiLiveConfigFlow) -> None:
     mock_session.get = _raising_get
 
     with patch(
-        "custom_components.tfi_live.config_flow.async_get_clientsession",
+        "custom_components.ha_tfi_live.config_flow.async_get_clientsession",
         return_value=mock_session,
     ):
         result = await flow.async_step_user(VALID_STEP1)
@@ -302,7 +302,7 @@ async def test_step1_http_500_returns_cannot_connect(flow: TfiLiveConfigFlow) ->
     """Issue #27: step 1 probe returning 5xx re-shows form with cannot_connect."""
     mock_session = _make_mock_session(status=500)
     with patch(
-        "custom_components.tfi_live.config_flow.async_get_clientsession",
+        "custom_components.ha_tfi_live.config_flow.async_get_clientsession",
         return_value=mock_session,
     ):
         result = await flow.async_step_user(VALID_STEP1)
@@ -875,7 +875,7 @@ async def test_reconfigure_happy_path(mock_hass: MagicMock) -> None:
     }
     mock_session = _make_mock_session(status=200)
     with patch(
-        "custom_components.tfi_live.config_flow.async_get_clientsession",
+        "custom_components.ha_tfi_live.config_flow.async_get_clientsession",
         return_value=mock_session,
     ):
         result = await flow.async_step_reconfigure(new_input)
@@ -901,7 +901,7 @@ async def test_reconfigure_invalid_auth(mock_hass: MagicMock) -> None:
     }
     mock_session = _make_mock_session(status=401)
     with patch(
-        "custom_components.tfi_live.config_flow.async_get_clientsession",
+        "custom_components.ha_tfi_live.config_flow.async_get_clientsession",
         return_value=mock_session,
     ):
         result = await flow.async_step_reconfigure(new_input)
@@ -955,7 +955,7 @@ def options_flow(mock_hass: MagicMock) -> TfiLiveOptionsFlowHandler:
     }
     mock_entry = MagicMock()
     mock_entry.data = existing_data
-    mock_entry.domain = "tfi_live"
+    mock_entry.domain = "ha_tfi_live"
 
     # config_entry is a read-only property on OptionsFlow that calls
     # hass.config_entries.async_get_known_entry(handler).  Wire up the mock

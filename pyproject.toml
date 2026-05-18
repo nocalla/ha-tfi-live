@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "tfi-live"
+name = "ha-tfi-live"
 version = "0.2.0"
 description = "Home Assistant custom integration for NTA/TFI real-time public transport departures"
 requires-python = ">=3.12"
@@ -35,7 +35,7 @@ testpaths = ["tests"]
 # Disable the pytest-homeassistant-custom-component plugin: it unconditionally
 # imports homeassistant.runner which pulls in the POSIX-only fcntl module and
 # crashes on Windows.  Tests use only unittest.mock.
-addopts = "-p no:homeassistant --cov=custom_components/tfi_live --cov-fail-under=95"
+addopts = "-p no:homeassistant --cov=custom_components/ha_tfi_live --cov-fail-under=95"
 
 [tool.mypy]
 strict = true

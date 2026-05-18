@@ -1,5 +1,5 @@
 {
-  "domain": "tfi_live",
+  "domain": "ha_tfi_live",
   "name": "TFI Live",
   "version": "0.2.0",
   "config_flow": true,
@@ -9,7 +9,7 @@
   "codeowners": [
     "@nocalla"
   ],
-  "documentation": "https://github.com/nocalla/tfi_live_ha",
-  "issue_tracker": "https://github.com/nocalla/tfi_live_ha/issues",
+  "documentation": "https://github.com/nocalla/ha-tfi-live",
+  "issue_tracker": "https://github.com/nocalla/ha-tfi-live/issues",
   "integration_type": "service"
 }

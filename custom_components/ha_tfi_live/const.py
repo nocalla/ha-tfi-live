@@ -8,7 +8,7 @@ truth rather than using bare string literals.
 from typing import Final
 
 # Integration identity
-DOMAIN: Final[str] = "tfi_live"
+DOMAIN: Final[str] = "ha_tfi_live"
 
 # Default feed URLs (pre-fill config flow step 1)
 DEFAULT_TRIP_UPDATE_URL: Final[str] = (

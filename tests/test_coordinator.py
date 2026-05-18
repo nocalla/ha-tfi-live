@@ -1,4 +1,4 @@
-"""Tests for custom_components.tfi_live.coordinator.TfiLiveCoordinator.
+"""Tests for custom_components.ha_tfi_live.coordinator.TfiLiveCoordinator.
 
 Covers: update interval (AC 14), successful fetch parsing, last-successful-fetch
 tracking, HTTP 500 error handling and log deduplication (AC 15, 16), HTTP 401
@@ -19,7 +19,7 @@ import pytest
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
-from custom_components.tfi_live.coordinator import TfiLiveCoordinator
+from custom_components.ha_tfi_live.coordinator import TfiLiveCoordinator
 
 # ---------------------------------------------------------------------------
 # Minimal valid GTFS-RT JSON payload
@@ -181,7 +181,7 @@ async def test_successful_fetch_returns_entities(coordinator):
 
     # Act
     with patch(
-        "custom_components.tfi_live.coordinator.async_get_clientsession",
+        "custom_components.ha_tfi_live.coordinator.async_get_clientsession",
         return_value=mock_session,
     ):
         result = await coordinator._async_update_data()
@@ -211,7 +211,7 @@ async def test_last_successful_fetch_set_on_success(coordinator):
 
     # Act
     with patch(
-        "custom_components.tfi_live.coordinator.async_get_clientsession",
+        "custom_components.ha_tfi_live.coordinator.async_get_clientsession",
         return_value=mock_session,
     ):
         await coordinator._async_update_data()
@@ -243,7 +243,7 @@ async def test_http_500_raises_update_failed(coordinator):
 
     # Act / Assert
     with patch(
-        "custom_components.tfi_live.coordinator.async_get_clientsession",
+        "custom_components.ha_tfi_live.coordinator.async_get_clientsession",
         return_value=mock_session,
     ):
         with pytest.raises(UpdateFailed):
@@ -262,11 +262,11 @@ async def test_http_500_logs_warning_once(coordinator, caplog):
 
     # Act — call twice, catching UpdateFailed each time
     with patch(
-        "custom_components.tfi_live.coordinator.async_get_clientsession",
+        "custom_components.ha_tfi_live.coordinator.async_get_clientsession",
         return_value=mock_session,
     ):
         with caplog.at_level(
-            logging.WARNING, logger="custom_components.tfi_live.coordinator"
+            logging.WARNING, logger="custom_components.ha_tfi_live.coordinator"
         ):
             for _ in range(2):
                 with pytest.raises(UpdateFailed):
@@ -292,11 +292,11 @@ async def test_http_500_second_call_no_extra_log(coordinator, caplog):
     mock_session = _make_mock_session(500)
 
     with patch(
-        "custom_components.tfi_live.coordinator.async_get_clientsession",
+        "custom_components.ha_tfi_live.coordinator.async_get_clientsession",
         return_value=mock_session,
     ):
         with caplog.at_level(
-            logging.WARNING, logger="custom_components.tfi_live.coordinator"
+            logging.WARNING, logger="custom_components.ha_tfi_live.coordinator"
         ):
             # First call
             with pytest.raises(UpdateFailed):
@@ -326,7 +326,7 @@ async def test_http_401_raises_config_entry_auth_failed(coordinator, mock_entry)
 
     # Act / Assert
     with patch(
-        "custom_components.tfi_live.coordinator.async_get_clientsession",
+        "custom_components.ha_tfi_live.coordinator.async_get_clientsession",
         return_value=mock_session,
     ):
         with pytest.raises(ConfigEntryAuthFailed):
@@ -346,11 +346,11 @@ async def test_http_401_logs_error_once(coordinator, caplog):
     mock_session = _make_mock_session(401)
 
     with patch(
-        "custom_components.tfi_live.coordinator.async_get_clientsession",
+        "custom_components.ha_tfi_live.coordinator.async_get_clientsession",
         return_value=mock_session,
     ):
         with caplog.at_level(
-            logging.ERROR, logger="custom_components.tfi_live.coordinator"
+            logging.ERROR, logger="custom_components.ha_tfi_live.coordinator"
         ):
             with pytest.raises(ConfigEntryAuthFailed):
                 await coordinator._async_update_data()
@@ -371,7 +371,7 @@ async def test_bad_json_raises_update_failed(coordinator):
 
     # Act / Assert
     with patch(
-        "custom_components.tfi_live.coordinator.async_get_clientsession",
+        "custom_components.ha_tfi_live.coordinator.async_get_clientsession",
         return_value=mock_session,
     ):
         with pytest.raises(UpdateFailed):
@@ -389,11 +389,11 @@ async def test_bad_json_logs_error(coordinator, caplog):
     mock_session = _make_mock_session(200, body=b"not json")
 
     with patch(
-        "custom_components.tfi_live.coordinator.async_get_clientsession",
+        "custom_components.ha_tfi_live.coordinator.async_get_clientsession",
         return_value=mock_session,
     ):
         with caplog.at_level(
-            logging.ERROR, logger="custom_components.tfi_live.coordinator"
+            logging.ERROR, logger="custom_components.ha_tfi_live.coordinator"
         ):
             with pytest.raises(UpdateFailed):
                 await coordinator._async_update_data()
@@ -416,7 +416,7 @@ async def test_network_error_raises_update_failed(coordinator):
 
     # Act / Assert
     with patch(
-        "custom_components.tfi_live.coordinator.async_get_clientsession",
+        "custom_components.ha_tfi_live.coordinator.async_get_clientsession",
         return_value=mock_session,
     ):
         with pytest.raises(UpdateFailed):
@@ -436,11 +436,11 @@ async def test_network_error_logs_warning(coordinator, caplog):
     )
 
     with patch(
-        "custom_components.tfi_live.coordinator.async_get_clientsession",
+        "custom_components.ha_tfi_live.coordinator.async_get_clientsession",
         return_value=mock_session,
     ):
         with caplog.at_level(
-            logging.WARNING, logger="custom_components.tfi_live.coordinator"
+            logging.WARNING, logger="custom_components.ha_tfi_live.coordinator"
         ):
             with pytest.raises(UpdateFailed):
                 await coordinator._async_update_data()

@@ -1,6 +1,6 @@
 """End-to-end integration tests for async_setup_entry and async_unload_entry.
 
-T-012: exercises the full setup/teardown lifecycle of the tfi_live integration
+T-012: exercises the full setup/teardown lifecycle of the ha_tfi_live integration
 with a fully mocked HTTP layer.  No live network calls are made at any point.
 pytest-homeassistant-custom-component fixtures are deliberately avoided because
 that plugin crashes on Windows (see conftest.py for details).
@@ -36,11 +36,11 @@ from homeassistant.config_entries import ConfigEntryState, current_entry
 from homeassistant.const import Platform
 from homeassistant.exceptions import ConfigEntryAuthFailed
 
-from custom_components.tfi_live.__init__ import (
+from custom_components.ha_tfi_live.__init__ import (
     async_setup_entry,
     async_unload_entry,
 )
-from custom_components.tfi_live.const import (
+from custom_components.ha_tfi_live.const import (
     CONF_API_KEY,
     CONF_SENSORS,
     CONF_STATIC_GTFS_URL,
@@ -245,11 +245,11 @@ async def test_setup_entry_happy_path_stores_coordinator_and_forwards_sensor() -
         with (
             patch("homeassistant.helpers.frame.report_usage"),
             patch(
-                "custom_components.tfi_live.__init__.async_get_clientsession",
+                "custom_components.ha_tfi_live.__init__.async_get_clientsession",
                 return_value=static_session,
             ),
             patch(
-                "custom_components.tfi_live.coordinator.async_get_clientsession",
+                "custom_components.ha_tfi_live.coordinator.async_get_clientsession",
                 return_value=rt_session,
             ),
         ):
@@ -300,11 +300,11 @@ async def test_setup_entry_static_gtfs_500_does_not_abort_setup() -> None:
         with (
             patch("homeassistant.helpers.frame.report_usage"),
             patch(
-                "custom_components.tfi_live.__init__.async_get_clientsession",
+                "custom_components.ha_tfi_live.__init__.async_get_clientsession",
                 return_value=static_session,
             ),
             patch(
-                "custom_components.tfi_live.coordinator.async_get_clientsession",
+                "custom_components.ha_tfi_live.coordinator.async_get_clientsession",
                 return_value=rt_session,
             ),
         ):
@@ -353,11 +353,11 @@ async def test_setup_entry_gtfs_rt_401_raises_config_entry_auth_failed() -> None
         with (
             patch("homeassistant.helpers.frame.report_usage"),
             patch(
-                "custom_components.tfi_live.__init__.async_get_clientsession",
+                "custom_components.ha_tfi_live.__init__.async_get_clientsession",
                 return_value=static_session,
             ),
             patch(
-                "custom_components.tfi_live.coordinator.async_get_clientsession",
+                "custom_components.ha_tfi_live.coordinator.async_get_clientsession",
                 return_value=rt_session,
             ),
         ):
@@ -399,11 +399,11 @@ async def test_unload_entry_returns_true_and_removes_coordinator() -> None:
         with (
             patch("homeassistant.helpers.frame.report_usage"),
             patch(
-                "custom_components.tfi_live.__init__.async_get_clientsession",
+                "custom_components.ha_tfi_live.__init__.async_get_clientsession",
                 return_value=static_session,
             ),
             patch(
-                "custom_components.tfi_live.coordinator.async_get_clientsession",
+                "custom_components.ha_tfi_live.coordinator.async_get_clientsession",
                 return_value=rt_session,
             ),
         ):
@@ -444,7 +444,7 @@ async def test_setup_entry_async_load_raises_warning_swallowed() -> None:
 
     from homeassistant.config_entries import current_entry
 
-    from custom_components.tfi_live.__init__ import async_setup_entry
+    from custom_components.ha_tfi_live.__init__ import async_setup_entry
 
     hass = _make_hass()
     entry = _make_entry()
@@ -458,15 +458,15 @@ async def test_setup_entry_async_load_raises_warning_swallowed() -> None:
         with (
             patch("homeassistant.helpers.frame.report_usage"),
             patch(
-                "custom_components.tfi_live.__init__.async_get_clientsession",
+                "custom_components.ha_tfi_live.__init__.async_get_clientsession",
                 return_value=MagicMock(),  # session for StaticGtfsCache (will raise)
             ),
             patch(
-                "custom_components.tfi_live.coordinator.async_get_clientsession",
+                "custom_components.ha_tfi_live.coordinator.async_get_clientsession",
                 return_value=rt_session,
             ),
             patch(
-                "custom_components.tfi_live.__init__.StaticGtfsCache.async_load",
+                "custom_components.ha_tfi_live.__init__.StaticGtfsCache.async_load",
                 new=AsyncMock(side_effect=RuntimeError("disk full")),
             ),
         ):
