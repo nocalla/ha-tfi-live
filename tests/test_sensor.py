@@ -585,3 +585,297 @@ def test_parse_hhmm_today_last_minute_of_day():
     result = _parse_hhmm_today("23:59")
     assert result.hour == 23
     assert result.minute == 59
+
+
+# ---------------------------------------------------------------------------
+# Branch coverage: uncovered paths (Issue #31 — enforce >= 95% coverage)
+# ---------------------------------------------------------------------------
+
+
+def test_name_property_returns_configured_name(mock_coordinator, sensor_config):
+    """name property returns the configured sensor name."""
+    sensor_config["name"] = "My Bus Stop"
+    s = TfiLiveSensor(mock_coordinator, sensor_config, "e1")
+    assert s.name == "My Bus Stop"
+
+
+def test_native_unit_of_measurement(mock_coordinator, sensor_config):
+    """native_unit_of_measurement returns 'min'."""
+    s = TfiLiveSensor(mock_coordinator, sensor_config, "e1")
+    assert s.native_unit_of_measurement == "min"
+
+
+def test_device_class_is_none(mock_coordinator, sensor_config):
+    """device_class returns None (negative values disqualify DURATION class)."""
+    s = TfiLiveSensor(mock_coordinator, sensor_config, "e1")
+    assert s.device_class is None
+
+
+def test_available_false_when_last_update_success_false(
+    mock_coordinator, sensor_config
+):
+    """available returns False when coordinator.last_update_success is False."""
+    mock_coordinator.last_update_success = False
+    s = TfiLiveSensor(mock_coordinator, sensor_config, "e1")
+    assert s.available is False
+
+
+def test_available_false_when_last_successful_fetch_none(
+    mock_coordinator, sensor_config
+):
+    """available returns False when last_successful_fetch is None."""
+    mock_coordinator.last_update_success = True
+    mock_coordinator.last_successful_fetch = None
+    s = TfiLiveSensor(mock_coordinator, sensor_config, "e1")
+    assert s.available is False
+
+
+def test_get_departures_returns_empty_when_coordinator_data_falsy(
+    mock_coordinator, sensor_config
+):
+    """_get_departures returns [] when coordinator.data is None or empty."""
+    mock_coordinator.data = None
+    s = TfiLiveSensor(mock_coordinator, sensor_config, "e1")
+    assert s._get_departures() == []
+
+
+def test_get_departures_skips_wrong_route_id(mock_coordinator, sensor_config):
+    """RT entity with non-matching route_id is ignored."""
+    mock_coordinator.data = {
+        "entities": [
+            {
+                "trip_id": "T1",
+                "route_id": "39A",  # different from sensor's 46A
+                "direction_id": None,
+                "start_date": "20260517",
+                "stop_time_updates": [
+                    {
+                        "stop_id": "STOP_A",
+                        "arrival_time": 9999999999,
+                        "departure_time": 9999999999,
+                        "arrival_delay": 0,
+                        "departure_delay": 0,
+                    }
+                ],
+            }
+        ]
+    }
+    s = TfiLiveSensor(mock_coordinator, sensor_config, "e1")
+    assert s._get_departures() == []
+
+
+def test_get_departures_skips_wrong_direction(mock_coordinator):
+    """RT entity filtered out when direction_id doesn't match."""
+    cfg = {
+        "name": "Sensor",
+        "stop_id": "STOP_A",
+        "route_id": "46A",
+        "direction_id": 1,  # filter for direction 1
+        "operator_id": None,
+    }
+    mock_coordinator.data = {
+        "entities": [
+            {
+                "trip_id": "T1",
+                "route_id": "46A",
+                "direction_id": "0",  # entity is direction 0
+                "start_date": "20260517",
+                "stop_time_updates": [
+                    {
+                        "stop_id": "STOP_A",
+                        "arrival_time": 9999999999,
+                        "departure_time": 9999999999,
+                        "arrival_delay": 0,
+                        "departure_delay": 0,
+                    }
+                ],
+            }
+        ]
+    }
+    s = TfiLiveSensor(mock_coordinator, cfg, "e1")
+    assert s._get_departures() == []
+
+
+def test_get_departures_skips_wrong_stop_id(mock_coordinator, sensor_config):
+    """stop_time_update with non-matching stop_id is skipped."""
+    from datetime import timedelta
+
+    future_ts = int((datetime.now() + timedelta(minutes=5)).timestamp())
+    mock_coordinator.data = {
+        "entities": [
+            {
+                "trip_id": "T1",
+                "route_id": "46A",
+                "direction_id": None,
+                "start_date": "20260517",
+                "stop_time_updates": [
+                    {
+                        "stop_id": "STOP_B",  # wrong stop
+                        "arrival_time": future_ts,
+                        "departure_time": future_ts,
+                        "arrival_delay": 0,
+                        "departure_delay": 0,
+                    }
+                ],
+            }
+        ]
+    }
+    s = TfiLiveSensor(mock_coordinator, sensor_config, "e1")
+    assert s._get_departures() == []
+
+
+def test_get_departures_skips_null_unix_ts(mock_coordinator, sensor_config):
+    """stop_time_update with None departure_time and None arrival_time is skipped."""
+    mock_coordinator.data = {
+        "entities": [
+            {
+                "trip_id": "T1",
+                "route_id": "46A",
+                "direction_id": None,
+                "start_date": "20260517",
+                "stop_time_updates": [
+                    {
+                        "stop_id": "STOP_A",
+                        "arrival_time": None,
+                        "departure_time": None,
+                        "arrival_delay": None,
+                        "departure_delay": None,
+                    }
+                ],
+            }
+        ]
+    }
+    s = TfiLiveSensor(mock_coordinator, sensor_config, "e1")
+    assert s._get_departures() == []
+
+
+def test_get_departures_rt_trip_enriched_from_static(mock_coordinator, sensor_config):
+    """RT departure is enriched with sched_time and route_name from static data."""
+    from datetime import timedelta
+
+    future_ts = int((datetime.now() + timedelta(minutes=10)).timestamp())
+    mock_coordinator.data = {
+        "entities": [
+            {
+                "trip_id": "TRIP_A",
+                "route_id": "46A",
+                "direction_id": None,
+                "start_date": "20260517",
+                "stop_time_updates": [
+                    {
+                        "stop_id": "STOP_A",
+                        "arrival_time": future_ts,
+                        "departure_time": future_ts,
+                        "arrival_delay": 0,
+                        "departure_delay": 60,
+                    }
+                ],
+            }
+        ]
+    }
+    # Return TRIP_A in static data too
+    future = datetime.now() + timedelta(minutes=9)
+    mock_coordinator._cache.get_scheduled_departures.return_value = [
+        ("TRIP_A", future.strftime("%H:%M"), "46A Route Name")
+    ]
+    s = TfiLiveSensor(mock_coordinator, sensor_config, "e1")
+    deps = s._get_departures()
+    assert len(deps) == 1
+    dep = deps[0]
+    assert dep["scheduled_time"] == future.strftime("%H:%M")
+    assert dep["route_name"] == "46A Route Name"
+    assert dep["realtime_time"] is not None
+
+
+def test_get_departures_static_only_trip_skipped_if_already_in_rt(
+    mock_coordinator, sensor_config
+):
+    """Static departure for a trip already in RT is not double-counted."""
+    from datetime import timedelta
+
+    future_ts = int((datetime.now() + timedelta(minutes=5)).timestamp())
+    mock_coordinator.data = {
+        "entities": [
+            {
+                "trip_id": "TRIP_A",
+                "route_id": "46A",
+                "direction_id": None,
+                "start_date": "20260517",
+                "stop_time_updates": [
+                    {
+                        "stop_id": "STOP_A",
+                        "arrival_time": future_ts,
+                        "departure_time": future_ts,
+                        "arrival_delay": 0,
+                        "departure_delay": 0,
+                    }
+                ],
+            }
+        ]
+    }
+    # Static also lists TRIP_A — should be skipped (already in RT)
+    future = datetime.now() + timedelta(minutes=5)
+    mock_coordinator._cache.get_scheduled_departures.return_value = [
+        ("TRIP_A", future.strftime("%H:%M"), "46A")
+    ]
+    s = TfiLiveSensor(mock_coordinator, sensor_config, "e1")
+    deps = s._get_departures()
+    # Should only have 1 departure, not 2
+    assert len(deps) == 1
+    assert deps[0]["realtime_time"] is not None
+
+
+# ---------------------------------------------------------------------------
+# async_setup_entry: direct call coverage (lines 57-62)
+# ---------------------------------------------------------------------------
+
+
+async def test_sensor_async_setup_entry_registers_entities() -> None:
+    """sensor.async_setup_entry creates TfiLiveSensor entities from entry.runtime_data.
+
+    Calls the sensor platform async_setup_entry directly with a mock entry
+    and mock async_add_entities to exercise the function body.
+
+    Arrange: mock coordinator on entry.runtime_data; two sensor configs in
+        entry.data[CONF_SENSORS]; mock async_add_entities callback.
+    Act: call sensor.async_setup_entry.
+    Assert: async_add_entities was called once with a list of two TfiLiveSensors.
+    """
+    from unittest.mock import MagicMock
+
+    from custom_components.tfi_live.const import CONF_SENSORS
+    from custom_components.tfi_live.sensor import (
+        TfiLiveSensor,
+        async_setup_entry,
+    )
+
+    coord = MagicMock()
+    coord.last_update_success = True
+    coord._last_successful_fetch = None
+    coord.data = {"entities": []}
+    coord._cache = MagicMock()
+    coord._cache.get_scheduled_departures.return_value = []
+
+    entry = MagicMock()
+    entry.entry_id = "eid"
+    entry.runtime_data = coord
+    entry.data = {
+        CONF_SENSORS: [
+            {"stop_id": "S1", "route_id": "46A", "name": "Sensor 1"},
+            {"stop_id": "S2", "route_id": "39A", "name": "Sensor 2"},
+        ]
+    }
+
+    hass = MagicMock()
+    added = []
+
+    def fake_add(entities, _update):
+        """Capture entities passed to async_add_entities."""
+        added.extend(entities)
+
+    await async_setup_entry(hass, entry, fake_add)
+
+    assert len(added) == 2
+    assert all(isinstance(e, TfiLiveSensor) for e in added)
+    assert added[0]._stop_id == "S1"
+    assert added[1]._stop_id == "S2"

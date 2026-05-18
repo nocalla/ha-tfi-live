@@ -261,7 +261,7 @@ async def test_setup_entry_happy_path_stores_coordinator_and_forwards_sensor() -
     # Assert — setup returns True
     assert result is True
 
-    # Assert — coordinator stored on entry.runtime_data
+    # Assert - coordinator stored on entry.runtime_data
     assert entry.runtime_data is not None
 
     # Assert — sensor platform was forwarded
@@ -316,7 +316,7 @@ async def test_setup_entry_static_gtfs_500_does_not_abort_setup() -> None:
     # Assert — setup completes successfully
     assert result is True
 
-    # Assert — coordinator is still registered on entry.runtime_data
+    # Assert - coordinator is still registered on entry.runtime_data
     assert entry.runtime_data is not None
 
 
@@ -376,7 +376,7 @@ async def test_setup_entry_gtfs_rt_401_raises_config_entry_auth_failed() -> None
 # ---------------------------------------------------------------------------
 
 
-async def test_unload_entry_returns_true() -> None:
+async def test_unload_entry_returns_true_and_removes_coordinator() -> None:
     """TC-4: async_unload_entry returns True after a successful setup.
 
     Arrange: perform a successful setup (same conditions as TC-1), then call
@@ -414,8 +414,65 @@ async def test_unload_entry_returns_true() -> None:
     # Sanity check: coordinator was stored
     assert entry.runtime_data is not None
 
-    # Act — unload
+    # Act - unload
     result = await async_unload_entry(hass, entry)
 
-    # Assert — returns True
+    # Assert - returns True
     assert result is True
+
+
+# ---------------------------------------------------------------------------
+# TC-5: async_load raises — warning logged, setup still completes
+# ---------------------------------------------------------------------------
+
+
+async def test_setup_entry_async_load_raises_warning_swallowed() -> None:
+    """TC-5: If async_load() raises, warning is logged and setup still completes.
+
+    This exercises the except branch in async_setup_entry that catches any
+    exception from cache.async_load() and logs a warning rather than aborting.
+
+    Arrange: patch StaticGtfsCache.async_load to raise RuntimeError; GTFS-RT
+        returns valid JSON.
+    Act: call async_setup_entry.
+    Assert:
+        - returns True without raising
+        - coordinator is stored at entry.runtime_data
+    """
+    import json
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from homeassistant.config_entries import current_entry
+
+    from custom_components.tfi_live.__init__ import async_setup_entry
+
+    hass = _make_hass()
+    entry = _make_entry()
+
+    rt_session = _make_http_session(
+        status=200, body=json.dumps(_VALID_GTFS_RT_PAYLOAD).encode()
+    )
+
+    token = current_entry.set(entry)
+    try:
+        with (
+            patch("homeassistant.helpers.frame.report_usage"),
+            patch(
+                "custom_components.tfi_live.__init__.async_get_clientsession",
+                return_value=MagicMock(),  # session for StaticGtfsCache (will raise)
+            ),
+            patch(
+                "custom_components.tfi_live.coordinator.async_get_clientsession",
+                return_value=rt_session,
+            ),
+            patch(
+                "custom_components.tfi_live.__init__.StaticGtfsCache.async_load",
+                new=AsyncMock(side_effect=RuntimeError("disk full")),
+            ),
+        ):
+            result = await async_setup_entry(hass, entry)
+    finally:
+        current_entry.reset(token)
+
+    assert result is True
+    assert entry.runtime_data is not None
