@@ -18,13 +18,12 @@ to satisfy the state check inside ``_async_config_entry_first_refresh``.
 Test cases
 ----------
 TC-1  Happy path: valid feed + valid static GTFS → setup completes, coordinator
-      stored in hass.data, sensor platform forwarded.
+      stored in entry.runtime_data, sensor platform forwarded.
 TC-2  AC 10: static GTFS HTTP 500 does not abort setup — coordinator is still
-      stored in hass.data after setup.
+      stored in entry.runtime_data after setup.
 TC-3  AC 17 end-to-end: GTFS-RT 401 during first refresh propagates
       ConfigEntryAuthFailed and triggers async_start_reauth.
-TC-4  Unload: after a successful setup, async_unload_entry returns True and
-      removes the coordinator from hass.data.
+TC-4  Unload: after a successful setup, async_unload_entry returns True.
 """
 
 import io
@@ -46,7 +45,6 @@ from custom_components.tfi_live.const import (
     CONF_SENSORS,
     CONF_STATIC_GTFS_URL,
     CONF_TRIP_UPDATE_URL,
-    DOMAIN,
 )
 
 # ---------------------------------------------------------------------------
@@ -229,7 +227,7 @@ async def test_setup_entry_happy_path_stores_coordinator_and_forwards_sensor() -
     Act: call async_setup_entry.
     Assert:
         - returns True without raising
-        - coordinator is stored at hass.data[DOMAIN][entry.entry_id]
+        - coordinator is stored at entry.runtime_data
         - async_forward_entry_setups was called with [Platform.SENSOR]
     """
     # Arrange
@@ -263,11 +261,8 @@ async def test_setup_entry_happy_path_stores_coordinator_and_forwards_sensor() -
     # Assert — setup returns True
     assert result is True
 
-    # Assert — coordinator stored in hass.data under the correct key
-    assert DOMAIN in hass.data
-    assert _ENTRY_ID in hass.data[DOMAIN]
-    coordinator = hass.data[DOMAIN][_ENTRY_ID]
-    assert coordinator is not None
+    # Assert — coordinator stored on entry.runtime_data
+    assert entry.runtime_data is not None
 
     # Assert — sensor platform was forwarded
     hass.config_entries.async_forward_entry_setups.assert_called_once_with(
@@ -289,7 +284,7 @@ async def test_setup_entry_static_gtfs_500_does_not_abort_setup() -> None:
     Act: call async_setup_entry.
     Assert:
         - does not raise
-        - coordinator is still stored in hass.data[DOMAIN][entry.entry_id]
+        - coordinator is still stored at entry.runtime_data
     """
     # Arrange
     hass = _make_hass()
@@ -321,10 +316,8 @@ async def test_setup_entry_static_gtfs_500_does_not_abort_setup() -> None:
     # Assert — setup completes successfully
     assert result is True
 
-    # Assert — coordinator is still registered
-    assert DOMAIN in hass.data
-    assert _ENTRY_ID in hass.data[DOMAIN]
-    assert hass.data[DOMAIN][_ENTRY_ID] is not None
+    # Assert — coordinator is still registered on entry.runtime_data
+    assert entry.runtime_data is not None
 
 
 # ---------------------------------------------------------------------------
@@ -383,14 +376,13 @@ async def test_setup_entry_gtfs_rt_401_raises_config_entry_auth_failed() -> None
 # ---------------------------------------------------------------------------
 
 
-async def test_unload_entry_returns_true_and_removes_coordinator() -> None:
-    """TC-4: async_unload_entry returns True and removes coordinator from hass.data.
+async def test_unload_entry_returns_true() -> None:
+    """TC-4: async_unload_entry returns True after a successful setup.
 
     Arrange: perform a successful setup (same conditions as TC-1), then call
         async_unload_entry.
     Assert:
         - async_unload_entry returns True
-        - hass.data[DOMAIN] no longer contains the entry's coordinator
     """
     # Arrange — successful setup first
     hass = _make_hass()
@@ -420,13 +412,10 @@ async def test_unload_entry_returns_true_and_removes_coordinator() -> None:
         current_entry.reset(token)
 
     # Sanity check: coordinator was stored
-    assert _ENTRY_ID in hass.data[DOMAIN]
+    assert entry.runtime_data is not None
 
     # Act — unload
     result = await async_unload_entry(hass, entry)
 
     # Assert — returns True
     assert result is True
-
-    # Assert — coordinator removed from hass.data
-    assert _ENTRY_ID not in hass.data[DOMAIN]

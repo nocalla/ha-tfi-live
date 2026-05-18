@@ -89,6 +89,9 @@ class TfiLiveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             A FlowResult that either re-shows the form with field errors or
             advances to :meth:`async_step_sensor`.
         """
+        await self.async_set_unique_id(DOMAIN)
+        self._abort_if_unique_id_configured()
+
         errors: dict[str, str] = {}
 
         if user_input is not None:
