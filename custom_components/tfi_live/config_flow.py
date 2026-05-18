@@ -12,7 +12,7 @@ from typing import Any
 
 import voluptuous as vol
 from homeassistant import config_entries
-from homeassistant.data_entry_flow import FlowResult
+from homeassistant.config_entries import ConfigFlowResult
 
 from .const import (
     CONF_API_KEY,
@@ -74,7 +74,7 @@ class TfiLiveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Handle step 1 — integration-level settings.
 
         Presents fields for the API key and the two feed URLs. The URLs are
@@ -140,7 +140,7 @@ class TfiLiveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_sensor(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Handle step 2 — add a sensor.
 
         Presents fields for one stop/route sensor. The step can be repeated
@@ -214,7 +214,7 @@ class TfiLiveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_add_another(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Handle the 'Add another sensor' menu choice.
 
         Loops back to :meth:`async_step_sensor` so the user can configure
@@ -231,7 +231,7 @@ class TfiLiveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_finish(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Handle the 'Finish' menu choice and create the config entry.
 
         Args:
@@ -243,7 +243,7 @@ class TfiLiveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """
         return self.async_create_entry(title="TFI Live", data=self._config)
 
-    async def async_step_reauth(self, entry_data: dict[str, Any]) -> FlowResult:
+    async def async_step_reauth(self, entry_data: dict[str, Any]) -> ConfigFlowResult:
         """Handle the start of a re-authentication flow.
 
         Called by HA when the coordinator signals that the current API key
@@ -262,7 +262,7 @@ class TfiLiveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_reauth_confirm(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Present the re-auth form and process the new API key.
 
         Only the ``api_key`` field is shown; all other configuration values

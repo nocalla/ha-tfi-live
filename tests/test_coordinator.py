@@ -10,6 +10,7 @@ made.  HomeAssistant and ConfigEntry are replaced with MagicMock objects.
 """
 
 import json
+import logging
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -259,8 +260,6 @@ async def test_http_500_logs_warning_once(coordinator, caplog):
     # Arrange
     mock_session = _make_mock_session(500)
 
-    import logging
-
     # Act — call twice, catching UpdateFailed each time
     with patch(
         "custom_components.tfi_live.coordinator.async_get_clientsession",
@@ -289,7 +288,6 @@ async def test_http_500_second_call_no_extra_log(coordinator, caplog):
     This test explicitly checks the deduplication key ``"http_500"`` is
     stable across back-to-back failures.
     """
-    import logging
 
     mock_session = _make_mock_session(500)
 
@@ -344,7 +342,6 @@ async def test_http_401_raises_config_entry_auth_failed(coordinator, mock_entry)
 
 async def test_http_401_logs_error_once(coordinator, caplog):
     """TC-9: A 401 response emits exactly one ERROR log entry."""
-    import logging
 
     mock_session = _make_mock_session(401)
 
@@ -388,7 +385,6 @@ async def test_bad_json_raises_update_failed(coordinator):
 
 async def test_bad_json_logs_error(coordinator, caplog):
     """TC-11: A 200 response with non-JSON body emits an ERROR log."""
-    import logging
 
     mock_session = _make_mock_session(200, body=b"not json")
 
@@ -434,7 +430,6 @@ async def test_network_error_raises_update_failed(coordinator):
 
 async def test_network_error_logs_warning(coordinator, caplog):
     """TC-13: An aiohttp.ClientError emits a WARNING log."""
-    import logging
 
     mock_session = _make_raising_session(
         aiohttp.ClientConnectionError("connection refused")

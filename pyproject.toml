@@ -36,3 +36,7 @@ testpaths = ["tests"]
 # imports homeassistant.runner which pulls in the POSIX-only fcntl module and
 # crashes on Windows.  Tests use only unittest.mock.
 addopts = "-p no:homeassistant"
+
+[tool.mypy]
+strict = true
+ignore_missing_imports = true
