@@ -1,7 +1,7 @@
 """Sensor entities for the TFI Live integration."""
 
 import logging
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -40,6 +40,15 @@ _DUBLIN_TZ = ZoneInfo("Europe/Dublin")
 _GRACE_MINUTES = 5
 
 PARALLEL_UPDATES = 1
+
+
+def _now_dublin() -> datetime:
+    """Return the current time as a naive datetime in Dublin local time.
+
+    Returns:
+        Naive datetime equivalent to ``datetime.now()`` in Europe/Dublin.
+    """
+    return datetime.now(_DUBLIN_TZ).replace(tzinfo=None)
 
 
 async def async_setup_entry(
@@ -172,7 +181,7 @@ class TfiLiveSensor(CoordinatorEntity[TfiLiveCoordinator], SensorEntity):
         if not departures:
             return None
         effective_dt = departures[0]["_effective_dt"]
-        delta = (effective_dt - datetime.now()).total_seconds()
+        delta = (effective_dt - _now_dublin()).total_seconds()
         return int(delta / 60)
 
     @property
@@ -246,7 +255,7 @@ class TfiLiveSensor(CoordinatorEntity[TfiLiveCoordinator], SensorEntity):
             return []
 
         entities = coordinator_data.get("entities", [])
-        now = datetime.now()
+        now = _now_dublin()
         cutoff = now - timedelta(minutes=_GRACE_MINUTES)
 
         # Build a dict of RT departures keyed by trip_id.
@@ -287,7 +296,7 @@ class TfiLiveSensor(CoordinatorEntity[TfiLiveCoordinator], SensorEntity):
             self._route_id,
             self._direction_id,
             self._operator_id,
-            date.today(),
+            datetime.now(_DUBLIN_TZ).date(),
         )
 
         # Build a lookup from trip_id → (scheduled_time_hhmm, route_name).
@@ -354,17 +363,17 @@ class TfiLiveSensor(CoordinatorEntity[TfiLiveCoordinator], SensorEntity):
 
 
 def _parse_hhmm_today(hhmm: str) -> datetime:
-    """Parse an ``HH:MM`` string into a naive datetime for today.
+    """Parse an ``HH:MM`` string into a naive Dublin-local datetime for today.
 
-    Combines the given time with today's date to produce a naive datetime
-    suitable for arithmetic against ``datetime.now()``.
+    Combines the given time with Dublin's current date to produce a naive
+    datetime suitable for arithmetic against ``_now_dublin()``.
 
     Args:
         hhmm: Time string in ``HH:MM`` format.
 
     Returns:
-        A naive ``datetime`` representing ``hhmm`` on today's date.
+        A naive ``datetime`` representing ``hhmm`` on Dublin's current date.
     """
-    today = date.today()
+    today = datetime.now(_DUBLIN_TZ).date()
     hour, minute = int(hhmm[:2]), int(hhmm[3:5])
     return datetime(today.year, today.month, today.day, hour, minute)
