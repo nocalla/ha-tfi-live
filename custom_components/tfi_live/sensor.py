@@ -2,6 +2,7 @@
 
 import logging
 from datetime import date, datetime, timedelta
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from homeassistant.components.sensor import SensorEntity
@@ -74,7 +75,7 @@ class TfiLiveSensor(CoordinatorEntity[TfiLiveCoordinator], SensorEntity):
     def __init__(
         self,
         coordinator: TfiLiveCoordinator,
-        sensor_config: dict,
+        sensor_config: dict[str, Any],
         entry_id: str,
     ) -> None:
         """Initialise the sensor with coordinator, config, and entry identity.
@@ -179,7 +180,7 @@ class TfiLiveSensor(CoordinatorEntity[TfiLiveCoordinator], SensorEntity):
         return int(delta / 60)
 
     @property
-    def extra_state_attributes(self) -> dict:
+    def extra_state_attributes(self) -> dict[str, Any]:
         """Return supplementary attributes for this sensor.
 
         When unavailable all values are ``None``.  When available, returns the
@@ -219,10 +220,14 @@ class TfiLiveSensor(CoordinatorEntity[TfiLiveCoordinator], SensorEntity):
             ATTR_DIRECTION_ID: self._direction_id,
             ATTR_OPERATOR_ID: self._operator_id,
             ATTR_DEPARTURES: public_departures,
-            ATTR_LAST_UPDATED: self.coordinator.last_successful_fetch.isoformat(),
+            ATTR_LAST_UPDATED: (
+                last_fetch.isoformat()
+                if (last_fetch := self.coordinator.last_successful_fetch) is not None
+                else None
+            ),
         }
 
-    def _get_departures(self) -> list[dict]:
+    def _get_departures(self) -> list[dict[str, Any]]:
         """Merge real-time and scheduled departures into a sorted, filtered list.
 
         Retrieves GTFS-RT trip updates from the coordinator and scheduled
@@ -254,7 +259,7 @@ class TfiLiveSensor(CoordinatorEntity[TfiLiveCoordinator], SensorEntity):
             str(self._direction_id) if self._direction_id is not None else None
         )
 
-        rt_by_trip: dict[str, dict] = {}
+        rt_by_trip: dict[str, dict[str, Any]] = {}
         for entity in entities:
             if entity["route_id"] != self._route_id:
                 continue
@@ -295,14 +300,16 @@ class TfiLiveSensor(CoordinatorEntity[TfiLiveCoordinator], SensorEntity):
             for trip_id, sched_time, route_name in static_departures
         }
 
-        candidates: list[dict] = []
+        candidates: list[dict[str, Any]] = []
 
         # Process RT departures.
         for trip_id, rt_info in rt_by_trip.items():
-            unix_ts: int = rt_info["_unix_ts"]
-            delay: int | None = rt_info["_delay"]
+            rt_unix_ts: int = rt_info["_unix_ts"]
+            rt_delay: int | None = rt_info["_delay"]
 
-            rt_dt = datetime.fromtimestamp(unix_ts, tz=_DUBLIN_TZ).replace(tzinfo=None)
+            rt_dt = datetime.fromtimestamp(rt_unix_ts, tz=_DUBLIN_TZ).replace(
+                tzinfo=None
+            )
             rt_hhmm = rt_dt.strftime("%H:%M")
 
             sched_hhmm: str | None = None
@@ -310,7 +317,9 @@ class TfiLiveSensor(CoordinatorEntity[TfiLiveCoordinator], SensorEntity):
             if trip_id in static_by_trip:
                 sched_hhmm, route_name = static_by_trip[trip_id]
 
-            delay_minutes: int | None = round(delay / 60) if delay is not None else None
+            delay_minutes: int | None = (
+                round(rt_delay / 60) if rt_delay is not None else None
+            )
 
             candidates.append(
                 {
