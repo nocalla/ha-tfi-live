@@ -9,6 +9,5 @@
   "codeowners": [
     "@nocalla"
   ],
-  "documentation": "https://github.com/nocalla/tfi_live_ha",
-  "icon": "mdi:bus-clock"
+  "documentation": "https://github.com/nocalla/tfi_live_ha"
 }
