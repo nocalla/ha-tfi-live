@@ -4,12 +4,14 @@ import logging
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from homeassistant.components.sensor import SensorEntity
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.components.sensor import SensorEntity, SensorStateClass
+from homeassistant.const import UnitOfTime
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
+from .__init__ import TfiLiveConfigEntry
 from .const import (
     ATTR_DEPARTURES,
     ATTR_DIRECTION_ID,
@@ -39,7 +41,7 @@ _GRACE_MINUTES = 5
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: TfiLiveConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up TFI Live sensor entities from a config entry.
@@ -52,7 +54,7 @@ async def async_setup_entry(
         entry: The config entry being set up.
         async_add_entities: Callback used to register new entities.
     """
-    coordinator: TfiLiveCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: TfiLiveCoordinator = entry.runtime_data
     entities = [
         TfiLiveSensor(coordinator, sensor_config, entry.entry_id)
         for sensor_config in entry.data[CONF_SENSORS]
@@ -68,6 +70,12 @@ class TfiLiveSensor(CoordinatorEntity[TfiLiveCoordinator], SensorEntity):
     GTFS cache.  When unavailable or when no service is found, state is
     ``None``.
     """
+
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfTime.MINUTES
+    # DURATION requires non-negative values; minutes-to-departure can be negative
+    _attr_device_class = None
+    _attr_has_entity_name = True
 
     def __init__(
         self,
@@ -90,6 +98,12 @@ class TfiLiveSensor(CoordinatorEntity[TfiLiveCoordinator], SensorEntity):
         self._operator_id: str | None = sensor_config.get("operator_id")
         self._name: str = sensor_config["name"]
         self._entry_id: str = entry_id
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, entry_id)},
+            name="TFI Live",
+            manufacturer="National Transport Authority",
+            entry_type=DeviceEntryType.SERVICE,
+        )
 
     @property
     def unique_id(self) -> str:
@@ -115,24 +129,6 @@ class TfiLiveSensor(CoordinatorEntity[TfiLiveCoordinator], SensorEntity):
             Human-readable sensor name from the config entry.
         """
         return self._name
-
-    @property
-    def native_unit_of_measurement(self) -> str:
-        """Return the unit of measurement for this sensor.
-
-        Returns:
-            ``"min"`` — minutes to next departure.
-        """
-        return "min"
-
-    @property
-    def device_class(self) -> None:
-        """Return None; this sensor has no HA device class.
-
-        Returns:
-            None.
-        """
-        return None
 
     @property
     def available(self) -> bool:

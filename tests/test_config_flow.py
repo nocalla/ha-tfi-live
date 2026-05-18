@@ -16,7 +16,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.data_entry_flow import AbortFlow, FlowResultType
 
 from custom_components.tfi_live.config_flow import TfiLiveConfigFlow
 from custom_components.tfi_live.const import (
@@ -81,8 +81,10 @@ def flow(mock_hass: MagicMock) -> TfiLiveConfigFlow:
 
     The HA ConfigFlow base class methods that normally require a running HA
     instance (async_show_form, async_show_menu, async_create_entry,
-    async_abort) are replaced with lightweight lambda stubs that return dicts
-    matching the FlowResultType contract.
+    async_abort, async_set_unique_id, _abort_if_unique_id_configured) are
+    replaced with lightweight stubs that return dicts matching the
+    FlowResultType contract, or are no-ops for the duplicate-guard helpers
+    (simulating "no existing entry" by default).
     """
     f = TfiLiveConfigFlow()
     f.hass = mock_hass
@@ -108,6 +110,15 @@ def flow(mock_hass: MagicMock) -> TfiLiveConfigFlow:
         "type": FlowResultType.ABORT,
         "reason": reason,
     }
+
+    # Default stubs for the duplicate-entry guard: no-op (no existing entry).
+    # Tests that exercise the duplicate path override these on the instance.
+    async def _noop_set_unique_id(unique_id: str) -> None:
+        """Stub: no-op when no existing entry is present."""
+
+    f.async_set_unique_id = _noop_set_unique_id  # type: ignore[method-assign]
+    f._abort_if_unique_id_configured = lambda: None  # type: ignore[method-assign]
+
     return f
 
 
@@ -672,3 +683,37 @@ async def test_step1_both_urls_invalid_reports_both_errors(
     assert result["type"] == FlowResultType.FORM
     assert result["errors"][CONF_TRIP_UPDATE_URL] == "invalid_url"
     assert result["errors"][CONF_STATIC_GTFS_URL] == "invalid_url"
+
+
+# ---------------------------------------------------------------------------
+# Issue #28 — duplicate entry guard
+# ---------------------------------------------------------------------------
+
+
+async def test_step1_aborts_when_already_configured(flow: TfiLiveConfigFlow) -> None:
+    """Issue #28: starting a second config flow aborts with 'already_configured'.
+
+    Simulates the scenario where TFI Live has already been set up.
+    ``_abort_if_unique_id_configured`` raises ``AbortFlow`` (the real HA
+    behaviour) when an entry with the same unique_id already exists; this
+    propagates out of ``async_step_user`` and is the signal the HA flow runner
+    uses to deliver the abort result to the UI.
+    """
+    # Arrange — stub async_set_unique_id (async, no-op) and make
+    # _abort_if_unique_id_configured raise AbortFlow as HA would.
+
+    async def _noop_set_unique_id(unique_id: str) -> None:
+        """No-op stub: records that DOMAIN was set as the unique ID."""
+
+    def _raise_abort() -> None:
+        raise AbortFlow("already_configured")
+
+    flow.async_set_unique_id = _noop_set_unique_id  # type: ignore[method-assign]
+    flow._abort_if_unique_id_configured = _raise_abort  # type: ignore[method-assign]
+
+    # Act — AbortFlow propagates out of async_step_user; pytest.raises captures it.
+    with pytest.raises(AbortFlow) as exc_info:
+        await flow.async_step_user(None)
+
+    # Assert — the abort reason is "already_configured"
+    assert exc_info.value.reason == "already_configured"
