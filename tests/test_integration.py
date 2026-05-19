@@ -1,7 +1,7 @@
 """End-to-end integration tests for async_setup_entry and async_unload_entry.
 
 T-012: exercises the full setup/teardown lifecycle of the ha_tfi_live integration
-with a fully mocked HTTP layer.  No live network calls are made at any point.
+with mocked library clients.  No live network calls are made at any point.
 pytest-homeassistant-custom-component fixtures are deliberately avoided because
 that plugin crashes on Windows (see conftest.py for details).
 
@@ -15,26 +15,38 @@ kwarg is passed.  Setting that ContextVar to the mock entry before calling
 context.  The mock entry must also have ``state == ConfigEntryState.SETUP_IN_PROGRESS``
 to satisfy the state check inside ``_async_config_entry_first_refresh``.
 
+Library clients (``GtfsRtClient`` and ``StaticGtfsClient``) are patched at the
+class level so that instances created inside ``async_setup_entry`` use mocked
+methods without requiring real HTTP sessions.
+
 Test cases
 ----------
-TC-1  Happy path: valid feed + valid static GTFS → setup completes, coordinator
-      stored in entry.runtime_data, sensor platform forwarded.
-TC-2  AC 10: static GTFS HTTP 500 does not abort setup — coordinator is still
-      stored in entry.runtime_data after setup.
-TC-3  AC 17 end-to-end: GTFS-RT 401 during first refresh propagates
+TC-1  Happy path: static GTFS load succeeds + valid RT feed → setup completes,
+      coordinator stored in entry.runtime_data, sensor platform forwarded.
+TC-2  AC 10: StaticGtfsLoadError during async_load does not abort setup —
+      coordinator is still stored in entry.runtime_data after setup.
+TC-3  TC-2 warning: StaticGtfsLoadError during async_load logs a WARNING.
+TC-4  AC 17 end-to-end: GtfsRtAuthError during first refresh propagates
       ConfigEntryAuthFailed and triggers async_start_reauth.
-TC-4  Unload: after a successful setup, async_unload_entry returns True.
+TC-5  Unload: after a successful setup, async_unload_entry returns True.
 """
 
-import io
-import json
-import zipfile
+import logging
+from contextlib import contextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from homeassistant.config_entries import ConfigEntryState, current_entry
 from homeassistant.const import Platform
 from homeassistant.exceptions import ConfigEntryAuthFailed
+from nta_gtfs import (
+    GtfsRtAuthError,
+    GtfsRtClient,
+    StaticGtfsClient,
+    StaticGtfsLoadError,
+    StopTimeUpdate,
+    TripUpdate,
+)
 
 from custom_components.ha_tfi_live.__init__ import (
     async_setup_entry,
@@ -56,107 +68,25 @@ _DUMMY_STATIC_GTFS_URL = "https://example.com/gtfs.zip"
 _DUMMY_API_KEY = "test-api-key"
 _ENTRY_ID = "test_entry_id"
 
-# A minimal valid GTFS-RT JSON payload that the coordinator can parse.
-_VALID_GTFS_RT_PAYLOAD: dict = {
-    "header": {"gtfs_realtime_version": "2.0"},
-    "entity": [
-        {
-            "id": "1",
-            "trip_update": {
-                "trip": {
-                    "trip_id": "TRIP_001",
-                    "route_id": "46A",
-                    "direction_id": 0,
-                    "start_date": "20260517",
-                },
-                "stop_time_update": [
-                    {
-                        "stop_id": "STOP_A",
-                        "arrival": {"delay": 120, "time": 1747503600},
-                        "departure": {"delay": 120, "time": 1747503660},
-                    }
-                ],
-            },
-        }
+_VALID_TRIP_UPDATE = TripUpdate(
+    trip_id="TRIP_001",
+    route_id="46A",
+    direction_id="0",
+    start_date="20260517",
+    stop_time_updates=[
+        StopTimeUpdate(
+            stop_id="STOP_A",
+            arrival_delay=120,
+            departure_delay=120,
+            arrival_time=1747503600,
+            departure_time=1747503660,
+        )
     ],
-}
-
-
-# ---------------------------------------------------------------------------
-# GTFS zip builder (mirrors the pattern from test_static_gtfs.py)
-# ---------------------------------------------------------------------------
-
-
-def _make_gtfs_zip() -> bytes:
-    """Build and return a minimal valid GTFS zip as raw bytes.
-
-    The archive contains the six required GTFS text files with enough data
-    for StaticGtfsCache.async_load() to succeed without error.
-
-    Returns:
-        Raw bytes of a valid in-memory GTFS zip archive.
-    """
-    stops_csv = "stop_id,stop_name\nSTOP_A,Stop Alpha\n"
-    routes_csv = "route_id,route_short_name,agency_id\nR1,46A,NTA\n"
-    trips_csv = "trip_id,route_id,service_id,direction_id\nT1,R1,SVC1,0\n"
-    stop_times_csv = (
-        "trip_id,stop_id,departure_time,stop_sequence\nT1,STOP_A,09:00:00,1\n"
-    )
-    calendar_csv = (
-        "service_id,monday,tuesday,wednesday,thursday,friday,saturday,sunday,"
-        "start_date,end_date\n"
-        "SVC1,1,1,1,1,1,1,1,20200101,20991231\n"
-    )
-    calendar_dates_csv = "service_id,date,exception_type\n"
-
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr("stops.txt", stops_csv)
-        zf.writestr("routes.txt", routes_csv)
-        zf.writestr("trips.txt", trips_csv)
-        zf.writestr("stop_times.txt", stop_times_csv)
-        zf.writestr("calendar.txt", calendar_csv)
-        zf.writestr("calendar_dates.txt", calendar_dates_csv)
-    return buf.getvalue()
-
+)
 
 # ---------------------------------------------------------------------------
-# Mock helpers
+# Shared helpers
 # ---------------------------------------------------------------------------
-
-
-def _make_http_session(
-    *,
-    status: int,
-    body: bytes = b"",
-) -> MagicMock:
-    """Return a mock aiohttp.ClientSession for a fixed HTTP response.
-
-    The mock supports the async context-manager protocol used by both
-    StaticGtfsCache (``resp.read()``) and TfiLiveCoordinator (``resp.text()``).
-
-    Args:
-        status: HTTP status code the mocked response will report.
-        body: Raw bytes returned by both ``resp.read()`` and decoded by
-            ``resp.text()``.
-
-    Returns:
-        MagicMock whose ``.get()`` method acts as an async context manager
-        yielding a response with the supplied status and body.
-    """
-    resp = MagicMock()
-    resp.status = status
-    resp.ok = status < 400
-    resp.read = AsyncMock(return_value=body)
-    resp.text = AsyncMock(return_value=body.decode(errors="replace"))
-
-    cm = MagicMock()
-    cm.__aenter__ = AsyncMock(return_value=resp)
-    cm.__aexit__ = AsyncMock(return_value=False)
-
-    session = MagicMock()
-    session.get = MagicMock(return_value=cm)
-    return session
 
 
 def _make_hass() -> MagicMock:
@@ -212,267 +142,186 @@ def _make_entry(*, sensors: list[dict] | None = None) -> MagicMock:
     return entry
 
 
+@contextmanager
+def _base_patches(
+    *,
+    static_load_side_effect=None,
+    rt_return_value=None,
+    rt_side_effect=None,
+):
+    """Context manager that applies the standard integration test patches.
+
+    Args:
+        static_load_side_effect: If set, ``StaticGtfsClient.async_load`` will
+            raise this exception instead of returning normally.
+        rt_return_value: List of ``TripUpdate`` objects returned by
+            ``GtfsRtClient.async_fetch_trip_updates``.  Defaults to a single
+            valid update when ``None`` and ``rt_side_effect`` is also ``None``.
+        rt_side_effect: If set, ``GtfsRtClient.async_fetch_trip_updates`` will
+            raise this exception.  Takes precedence over ``rt_return_value``.
+
+    Yields:
+        None — caller uses ``async_setup_entry`` / ``async_unload_entry``
+        inside the ``with`` block.
+    """
+    if rt_return_value is None and rt_side_effect is None:
+        rt_return_value = [_VALID_TRIP_UPDATE]
+
+    static_mock = AsyncMock(side_effect=static_load_side_effect)
+    rt_mock = AsyncMock(return_value=rt_return_value, side_effect=rt_side_effect)
+
+    with (
+        patch("homeassistant.helpers.frame.report_usage"),
+        patch(
+            "custom_components.ha_tfi_live.__init__.async_get_clientsession",
+            return_value=MagicMock(),
+        ),
+        patch.object(StaticGtfsClient, "async_load", static_mock),
+        patch.object(GtfsRtClient, "async_fetch_trip_updates", rt_mock),
+    ):
+        yield
+
+
 # ---------------------------------------------------------------------------
 # TC-1: Happy path setup
 # ---------------------------------------------------------------------------
 
 
 async def test_setup_entry_happy_path_stores_coordinator_and_forwards_sensor() -> None:
-    """TC-1: Valid feed + valid static GTFS → coordinator stored, sensor forwarded.
+    """TC-1: Valid RT feed + static load success → coordinator stored, sensor forwarded.
 
     Arrange: hass with empty data dict; config entry with all required keys and
-        state SETUP_IN_PROGRESS; static GTFS HTTP returns a valid zip; GTFS-RT
-        returns well-formed JSON.  The current_entry ContextVar is set so the
-        coordinator can resolve config_entry during its __init__.
+        state SETUP_IN_PROGRESS; StaticGtfsClient.async_load succeeds;
+        GtfsRtClient.async_fetch_trip_updates returns a valid list.
     Act: call async_setup_entry.
     Assert:
         - returns True without raising
         - coordinator is stored at entry.runtime_data
         - async_forward_entry_setups was called with [Platform.SENSOR]
     """
-    # Arrange
     hass = _make_hass()
     entry = _make_entry()
 
-    gtfs_zip = _make_gtfs_zip()
-    static_session = _make_http_session(status=200, body=gtfs_zip)
-    rt_session = _make_http_session(
-        status=200, body=json.dumps(_VALID_GTFS_RT_PAYLOAD).encode()
-    )
-
     token = current_entry.set(entry)
     try:
-        with (
-            patch("homeassistant.helpers.frame.report_usage"),
-            patch(
-                "custom_components.ha_tfi_live.__init__.async_get_clientsession",
-                return_value=static_session,
-            ),
-            patch(
-                "custom_components.ha_tfi_live.coordinator.async_get_clientsession",
-                return_value=rt_session,
-            ),
-        ):
-            # Act
+        with _base_patches():
             result = await async_setup_entry(hass, entry)
     finally:
         current_entry.reset(token)
 
-    # Assert — setup returns True
     assert result is True
-
-    # Assert - coordinator stored on entry.runtime_data
     assert entry.runtime_data is not None
-
-    # Assert — sensor platform was forwarded
     hass.config_entries.async_forward_entry_setups.assert_called_once_with(
         entry, [Platform.SENSOR]
     )
 
 
 # ---------------------------------------------------------------------------
-# TC-2: AC 10 — static GTFS HTTP 500 does not abort setup
+# TC-2: AC 10 — StaticGtfsLoadError does not abort setup
 # ---------------------------------------------------------------------------
 
 
-async def test_setup_entry_static_gtfs_500_does_not_abort_setup() -> None:
-    """TC-2 (AC 10): Static GTFS HTTP 500 is swallowed; setup still completes.
+async def test_setup_entry_static_gtfs_load_error_does_not_abort_setup() -> None:
+    """TC-2 (AC 10): StaticGtfsLoadError from async_load is swallowed; setup completes.
 
-    Arrange: static GTFS URL returns HTTP 500; GTFS-RT returns valid JSON.
-        The current_entry ContextVar is set so the coordinator resolves its
-        config_entry during __init__.
+    Arrange: StaticGtfsClient.async_load raises StaticGtfsLoadError;
+        GtfsRtClient.async_fetch_trip_updates returns valid data.
     Act: call async_setup_entry.
     Assert:
         - does not raise
         - coordinator is still stored at entry.runtime_data
     """
-    # Arrange
     hass = _make_hass()
     entry = _make_entry()
 
-    static_session = _make_http_session(status=500, body=b"Internal Server Error")
-    rt_session = _make_http_session(
-        status=200, body=json.dumps(_VALID_GTFS_RT_PAYLOAD).encode()
-    )
-
     token = current_entry.set(entry)
     try:
-        with (
-            patch("homeassistant.helpers.frame.report_usage"),
-            patch(
-                "custom_components.ha_tfi_live.__init__.async_get_clientsession",
-                return_value=static_session,
-            ),
-            patch(
-                "custom_components.ha_tfi_live.coordinator.async_get_clientsession",
-                return_value=rt_session,
-            ),
-        ):
-            # Act — must not raise despite the static GTFS failure
+        with _base_patches(static_load_side_effect=StaticGtfsLoadError("HTTP 500")):
             result = await async_setup_entry(hass, entry)
     finally:
         current_entry.reset(token)
 
-    # Assert — setup completes successfully
     assert result is True
-
-    # Assert - coordinator is still registered on entry.runtime_data
     assert entry.runtime_data is not None
 
 
 # ---------------------------------------------------------------------------
-# TC-3: AC 17 — GTFS-RT 401 propagates ConfigEntryAuthFailed
+# TC-3: StaticGtfsLoadError logs a WARNING
 # ---------------------------------------------------------------------------
 
 
-async def test_setup_entry_gtfs_rt_401_raises_config_entry_auth_failed() -> None:
-    """TC-3 (AC 17): GTFS-RT 401 during first refresh propagates ConfigEntryAuthFailed.
+async def test_setup_entry_static_gtfs_load_error_logs_warning(caplog) -> None:
+    """TC-3: StaticGtfsLoadError during async_load emits a WARNING log entry."""
+    hass = _make_hass()
+    entry = _make_entry()
 
-    The coordinator's _async_update_data is allowed to run for real (with a
-    mocked 401 HTTP response) so that the full auth-failure path is exercised,
-    including the call to entry.async_start_reauth.
+    token = current_entry.set(entry)
+    try:
+        with _base_patches(static_load_side_effect=StaticGtfsLoadError("HTTP 500")):
+            with caplog.at_level(
+                logging.WARNING, logger="custom_components.ha_tfi_live"
+            ):
+                await async_setup_entry(hass, entry)
+    finally:
+        current_entry.reset(token)
 
-    Arrange: static GTFS returns a valid zip; GTFS-RT returns HTTP 401.
-        The current_entry ContextVar is set so the coordinator resolves its
-        config_entry during __init__.
+    warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+    assert len(warnings) >= 1
+
+
+# ---------------------------------------------------------------------------
+# TC-4: AC 17 — GtfsRtAuthError propagates ConfigEntryAuthFailed
+# ---------------------------------------------------------------------------
+
+
+async def test_setup_entry_gtfs_rt_auth_error_raises_config_entry_auth_failed() -> None:
+    """TC-4 (AC 17): GtfsRtAuthError during first refresh propagates auth failure.
+
+    Arrange: StaticGtfsClient.async_load succeeds; GtfsRtClient raises
+        GtfsRtAuthError.
     Act: call async_setup_entry.
     Assert:
         - raises ConfigEntryAuthFailed
         - entry.async_start_reauth was called exactly once
     """
-    # Arrange
     hass = _make_hass()
     entry = _make_entry()
 
-    gtfs_zip = _make_gtfs_zip()
-    static_session = _make_http_session(status=200, body=gtfs_zip)
-    rt_session = _make_http_session(status=401, body=b"Unauthorized")
-
     token = current_entry.set(entry)
     try:
-        with (
-            patch("homeassistant.helpers.frame.report_usage"),
-            patch(
-                "custom_components.ha_tfi_live.__init__.async_get_clientsession",
-                return_value=static_session,
-            ),
-            patch(
-                "custom_components.ha_tfi_live.coordinator.async_get_clientsession",
-                return_value=rt_session,
-            ),
-        ):
-            # Act / Assert — ConfigEntryAuthFailed must propagate out of setup
+        with _base_patches(rt_side_effect=GtfsRtAuthError("HTTP 401")):
             with pytest.raises(ConfigEntryAuthFailed):
                 await async_setup_entry(hass, entry)
     finally:
         current_entry.reset(token)
 
-    # Assert — reauth was triggered on the config entry
     entry.async_start_reauth.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
-# TC-4: Unload removes coordinator from hass.data
+# TC-5: Unload returns True
 # ---------------------------------------------------------------------------
 
 
-async def test_unload_entry_returns_true_and_removes_coordinator() -> None:
-    """TC-4: async_unload_entry returns True after a successful setup.
+async def test_unload_entry_returns_true() -> None:
+    """TC-5: async_unload_entry returns True after a successful setup.
 
     Arrange: perform a successful setup (same conditions as TC-1), then call
         async_unload_entry.
     Assert:
         - async_unload_entry returns True
     """
-    # Arrange — successful setup first
     hass = _make_hass()
     entry = _make_entry()
 
-    gtfs_zip = _make_gtfs_zip()
-    static_session = _make_http_session(status=200, body=gtfs_zip)
-    rt_session = _make_http_session(
-        status=200, body=json.dumps(_VALID_GTFS_RT_PAYLOAD).encode()
-    )
-
     token = current_entry.set(entry)
     try:
-        with (
-            patch("homeassistant.helpers.frame.report_usage"),
-            patch(
-                "custom_components.ha_tfi_live.__init__.async_get_clientsession",
-                return_value=static_session,
-            ),
-            patch(
-                "custom_components.ha_tfi_live.coordinator.async_get_clientsession",
-                return_value=rt_session,
-            ),
-        ):
+        with _base_patches():
             await async_setup_entry(hass, entry)
     finally:
         current_entry.reset(token)
 
-    # Sanity check: coordinator was stored
     assert entry.runtime_data is not None
 
-    # Act - unload
     result = await async_unload_entry(hass, entry)
-
-    # Assert - returns True
     assert result is True
-
-
-# ---------------------------------------------------------------------------
-# TC-5: async_load raises — warning logged, setup still completes
-# ---------------------------------------------------------------------------
-
-
-async def test_setup_entry_async_load_raises_warning_swallowed() -> None:
-    """TC-5: If async_load() raises, warning is logged and setup still completes.
-
-    This exercises the except branch in async_setup_entry that catches any
-    exception from cache.async_load() and logs a warning rather than aborting.
-
-    Arrange: patch StaticGtfsCache.async_load to raise RuntimeError; GTFS-RT
-        returns valid JSON.
-    Act: call async_setup_entry.
-    Assert:
-        - returns True without raising
-        - coordinator is stored at entry.runtime_data
-    """
-    import json
-    from unittest.mock import AsyncMock, MagicMock, patch
-
-    from homeassistant.config_entries import current_entry
-
-    from custom_components.ha_tfi_live.__init__ import async_setup_entry
-
-    hass = _make_hass()
-    entry = _make_entry()
-
-    rt_session = _make_http_session(
-        status=200, body=json.dumps(_VALID_GTFS_RT_PAYLOAD).encode()
-    )
-
-    token = current_entry.set(entry)
-    try:
-        with (
-            patch("homeassistant.helpers.frame.report_usage"),
-            patch(
-                "custom_components.ha_tfi_live.__init__.async_get_clientsession",
-                return_value=MagicMock(),  # session for StaticGtfsCache (will raise)
-            ),
-            patch(
-                "custom_components.ha_tfi_live.coordinator.async_get_clientsession",
-                return_value=rt_session,
-            ),
-            patch(
-                "custom_components.ha_tfi_live.__init__.StaticGtfsCache.async_load",
-                new=AsyncMock(side_effect=RuntimeError("disk full")),
-            ),
-        ):
-            result = await async_setup_entry(hass, entry)
-    finally:
-        current_entry.reset(token)
-
-    assert result is True
-    assert entry.runtime_data is not None
