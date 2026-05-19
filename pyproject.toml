@@ -7,7 +7,9 @@ name = "ha-tfi-live"
 version = "0.2.0"
 description = "Home Assistant custom integration for NTA/TFI real-time public transport departures"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "python-nta-gtfs",
+]
 
 [project.optional-dependencies]
 dev = [
@@ -41,3 +43,6 @@ addopts = "-p no:homeassistant --cov=custom_components/ha_tfi_live --cov-fail-un
 strict = true
 ignore_missing_imports = true
 namespace_packages = false
+
+[tool.uv.sources]
+python-nta-gtfs = { git = "https://github.com/nocalla/python-nta-gtfs.git" }
