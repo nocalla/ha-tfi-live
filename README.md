@@ -3,7 +3,7 @@
 [![CI](https://github.com/nocalla/ha-tfi-live/actions/workflows/ci.yml/badge.svg)](https://github.com/nocalla/ha-tfi-live/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/badge/release-v0.2.0-blue)](https://github.com/nocalla/ha-tfi-live/releases)
 [![License](https://img.shields.io/badge/license-MIT-green)](https://github.com/nocalla/ha-tfi-live/blob/master/LICENSE)
-[![Coverage](https://img.shields.io/badge/coverage-96%25-brightgreen)](https://github.com/nocalla/ha-tfi-live/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/badge/coverage-99%25-brightgreen)](https://github.com/nocalla/ha-tfi-live/actions/workflows/ci.yml)
 [![HACS: Custom](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://hacs.xyz)
 [![HA: 2024.1+](https://img.shields.io/badge/Home%20Assistant-2024.1%2B-41bdf5.svg)](https://www.home-assistant.io)
 [![Python: 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)](https://github.com/nocalla/ha-tfi-live/blob/master/pyproject.toml)
@@ -36,7 +36,7 @@ Each configured sensor reports the minutes to the next departure for a given sto
 
 ### Manual
 
-1. Copy `custom_components/tfi_live/` into your HA `config/custom_components/` directory.
+1. Copy `custom_components/ha_tfi_live/` into your HA `config/custom_components/` directory.
 2. Restart Home Assistant.
 
 ## Configuration
@@ -73,7 +73,7 @@ To remove the integration:
 2. Confirm the deletion. All associated entities are removed immediately.
 3. Re-adding the integration later will restore your sensors from the configuration you enter during setup.
 
-For **manual installs**: delete the `custom_components/tfi_live/` directory from your HA config directory and restart Home Assistant.
+For **manual installs**: delete the `custom_components/ha_tfi_live/` directory from your HA config directory and restart Home Assistant.
 ## Entity Model
 
 **State:** Integer minutes to the next departure (truncated toward zero). `None` when no upcoming service is found or when the feed has not been updated within the last 3 minutes.
@@ -139,17 +139,21 @@ automation:
 ## Development
 
 ```bash
-# Clone and create venv
+# Clone and install
 git clone https://github.com/nocalla/ha-tfi-live.git
-cd tfi_live_ha
-uv sync --extra dev
+cd ha-tfi-live
+uv sync --extra dev   # installs python-nta-gtfs from GitHub automatically
 
 # Run tests
 uv run pytest
 
 # Lint
-uv run ruff check .
-uv run ruff format --check .
+uv run ruff check custom_components/ tests/
+uv run ruff format --check custom_components/ tests/
 ```
 
 The test suite uses `unittest.mock` throughout — no live network calls are made and no Home Assistant instance is required.
+
+### Library dependency
+
+Real-time and static GTFS fetch/parse logic lives in a separate library: [`python-nta-gtfs`](https://github.com/nocalla/python-nta-gtfs). It is declared as a git dependency in `pyproject.toml` and installed automatically by `uv sync`. Once the library is published to PyPI the dependency will switch to a version pin and `manifest.json` will declare it as an HA requirement (tracked in [#70](https://github.com/nocalla/ha-tfi-live/issues/70)).
