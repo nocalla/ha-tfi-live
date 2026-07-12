@@ -1,0 +1,73 @@
+name: Bug report
+description: Something in the integration isn't working as expected.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Please fill in as much of
+        the form below as you can — version numbers and debug logs make bugs
+        much faster to fix.
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: A clear description of the bug, and what you expected to happen instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: How can the behaviour be reproduced?
+      placeholder: |
+        1. Add the integration via Settings → Devices & Services
+        2. Configure a stop with …
+        3. …
+    validations:
+      required: false
+  - type: input
+    id: ha-version
+    attributes:
+      label: Home Assistant version
+      description: Settings → About, e.g. `2026.7.1`.
+      placeholder: "2026.7.1"
+    validations:
+      required: true
+  - type: input
+    id: integration-version
+    attributes:
+      label: Integration version
+      description: Shown in HACS or in `custom_components/ha_tfi_live/manifest.json`, e.g. `0.2.4`.
+      placeholder: "0.2.4"
+    validations:
+      required: true
+  - type: dropdown
+    id: install-method
+    attributes:
+      label: Installation method
+      options:
+        - HACS
+        - Manual (copied to custom_components)
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Debug logs
+      description: |
+        Enable debug logging via Settings → Devices & Services → HA TFI Live →
+        Enable debug logging (or add `custom_components.ha_tfi_live: debug`
+        under `logger:` in `configuration.yaml`), reproduce the issue, then
+        paste the relevant log output here. This field is formatted as code
+        automatically. **Please remove your NTA API key if it appears.**
+      render: text
+    validations:
+      required: false
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I have searched existing issues for this bug.
+          required: true
