@@ -162,6 +162,8 @@ uv run ruff format --check custom_components/ tests/
 
 The test suite uses `unittest.mock` throughout — no live network calls are made and no Home Assistant instance is required.
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for full contribution guidelines and the maintainer release process.
+
 ### Library dependency
 
 Real-time and static GTFS fetch/parse logic lives in a separate library: [`nta-gtfs`](https://pypi.org/project/nta-gtfs/) ([source](https://github.com/nocalla/python-nta-gtfs), import name `nta_gtfs`). It is published on PyPI, declared as a versioned dependency in `pyproject.toml`, and listed as a requirement in `manifest.json` so Home Assistant installs it automatically.
