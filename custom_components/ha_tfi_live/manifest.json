@@ -1,15 +1,15 @@
 {
   "domain": "ha_tfi_live",
   "name": "TFI Live",
-  "version": "0.2.0",
-  "config_flow": true,
-  "iot_class": "cloud_polling",
-  "requirements": ["nta-gtfs==0.1.0"],
-  "dependencies": [],
   "codeowners": [
     "@nocalla"
   ],
+  "config_flow": true,
+  "dependencies": [],
   "documentation": "https://github.com/nocalla/ha-tfi-live",
+  "integration_type": "service",
+  "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/nocalla/ha-tfi-live/issues",
-  "integration_type": "service"
+  "requirements": ["nta-gtfs==0.1.0"],
+  "version": "0.2.0"
 }
