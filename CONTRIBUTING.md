@@ -63,10 +63,10 @@ ci: add hassfest validation workflow
 
 For pull requests:
 
-1. Branch from `master` and keep the PR focused on a single change.
+1. Branch from `main` and keep the PR focused on a single change.
 2. Add or update tests — coverage must stay at or above 95%.
 3. Make sure `uv run pytest` and both ruff commands pass locally.
-4. Open the PR against `master` and describe what changed and why.
+4. Open the PR against `main` and describe what changed and why.
 
 Two workflows run on every PR:
 
@@ -101,7 +101,7 @@ drafting is needed:
    - `pyproject.toml`,
    - the Release badge in `README.md`.
 3. Commits the changes as `chore: release vX.Y.Z`, tags `vX.Y.Z`, and pushes
-   both to `master`.
+   both to `main`.
 4. Builds `ha-tfi-live.zip` from `custom_components/ha_tfi_live/`.
 5. Creates a GitHub release for the tag with auto-generated release notes and
    the zip attached.

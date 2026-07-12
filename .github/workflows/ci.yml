@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [master]
+    branches: [main]
   pull_request:
-    branches: [master]
+    branches: [main]
 
 jobs:
   lint:
@@ -38,7 +38,7 @@ jobs:
           uv run ruff check --fix .
 
       - name: Commit ruff fixes
-        # Only push back when we own the branch: direct pushes to master, or
+        # Only push back when we own the branch: direct pushes to main, or
         # PRs opened from branches in this repo (not external forks).
         if: >
           github.event_name == 'push' ||

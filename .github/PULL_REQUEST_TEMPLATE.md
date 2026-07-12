@@ -8,7 +8,7 @@
 
 Per [CONTRIBUTING.md](../CONTRIBUTING.md):
 
-- [ ] The PR is focused on a single change, branched from `master`
+- [ ] The PR is focused on a single change, branched from `main`
 - [ ] `uv run pytest` passes locally (coverage stays at or above 95%)
 - [ ] `uv run ruff check custom_components/ tests/` passes
 - [ ] `uv run ruff format --check custom_components/ tests/` passes
