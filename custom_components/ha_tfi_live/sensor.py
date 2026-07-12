@@ -88,6 +88,8 @@ class TfiLiveSensor(CoordinatorEntity[TfiLiveCoordinator], SensorEntity):
     # DURATION requires non-negative values; minutes-to-departure can be negative
     _attr_device_class = None
     _attr_has_entity_name = True
+    # Drives the icon lookup in icons.json; entity names come from user config
+    _attr_translation_key = "next_departure"
 
     def __init__(
         self,
