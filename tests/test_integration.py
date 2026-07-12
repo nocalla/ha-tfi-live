@@ -39,6 +39,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from homeassistant.config_entries import ConfigEntryState, current_entry
 from homeassistant.const import Platform
+from homeassistant.core import CoreState
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from nta_gtfs import (
     GtfsRtAuthError,
@@ -95,13 +96,16 @@ def _make_hass() -> MagicMock:
     """Return a minimal MagicMock standing in for a HomeAssistant instance.
 
     Returns:
-        MagicMock with ``data = {}``, ``is_stopping = False``, and
-        ``config_entries`` whose ``async_forward_entry_setups`` and
-        ``async_unload_platforms`` are ``AsyncMock`` returning ``True``.
+        MagicMock with ``data = {}``, ``is_stopping = False``, ``state =
+        CoreState.running`` (an entry set up after HA startup, so the static
+        GTFS load is not deferred), and ``config_entries`` whose
+        ``async_forward_entry_setups`` and ``async_unload_platforms`` are
+        ``AsyncMock`` returning ``True``.
     """
     hass = MagicMock()
     hass.data = {}
     hass.is_stopping = False
+    hass.state = CoreState.running
     hass.config_entries = MagicMock()
     hass.config_entries.async_forward_entry_setups = AsyncMock(return_value=True)
     hass.config_entries.async_unload_platforms = AsyncMock(return_value=True)

@@ -14,6 +14,7 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from homeassistant.core import CoreState
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import UpdateFailed
 from nta_gtfs import (
@@ -54,9 +55,14 @@ _VALID_TRIP_UPDATE = TripUpdate(
 
 @pytest.fixture
 def mock_hass():
-    """Return a minimal MagicMock standing in for HomeAssistant."""
+    """Return a minimal MagicMock standing in for HomeAssistant.
+
+    ``state`` defaults to ``CoreState.running`` so scheduling tests exercise
+    the normal post-startup path; startup-deferral tests override it.
+    """
     hass = MagicMock()
     hass.data = {}
+    hass.state = CoreState.running
     return hass
 
 
@@ -390,6 +396,64 @@ async def test_static_refresh_rescheduled_after_completion(
     await coordinator._async_update_data()
 
     assert mock_entry.async_create_background_task.call_count == 2
+
+
+async def test_static_refresh_not_scheduled_when_fetch_fails(
+    coordinator, mock_rt_client, mock_entry, mock_cache
+):
+    """No static load is scheduled when the RT fetch fails (#100).
+
+    A failing update keeps the entry in setup-retry; scheduling the ~80 MB
+    static load on every retry OOM-killed HA core on low-memory hosts.
+    """
+    mock_cache.loaded_at = None
+    mock_rt_client.async_fetch_trip_updates.side_effect = GtfsRtFetchError("HTTP 500")
+
+    with pytest.raises(UpdateFailed):
+        await coordinator._async_update_data()
+
+    mock_entry.async_create_background_task.assert_not_called()
+
+
+async def test_static_refresh_scheduled_on_failure_after_prior_success(
+    coordinator, mock_rt_client, mock_entry, mock_cache
+):
+    """A failing update still schedules the refresh once setup has succeeded.
+
+    Only setup-retry loops are blocked (#100); after the first successful
+    refresh, static data must stay fresh even through an RT feed outage
+    because sensors fall back to schedule data.
+    """
+    mock_cache.loaded_at = None
+
+    await coordinator._async_update_data()
+    assert mock_entry.async_create_background_task.call_count == 1
+
+    mock_rt_client.async_fetch_trip_updates.side_effect = GtfsRtFetchError("HTTP 500")
+    with pytest.raises(UpdateFailed):
+        await coordinator._async_update_data()
+
+    assert mock_entry.async_create_background_task.call_count == 2
+
+
+async def test_static_refresh_deferred_until_ha_started(
+    coordinator, mock_hass, mock_entry, mock_cache
+):
+    """No static load is scheduled while HA is still starting (#100).
+
+    The load is skipped during startup, when memory pressure is highest,
+    and picked up by the first coordinator update after HA reaches
+    ``CoreState.running``.
+    """
+    mock_cache.loaded_at = None
+    mock_hass.state = CoreState.starting
+
+    await coordinator._async_update_data()
+    mock_entry.async_create_background_task.assert_not_called()
+
+    mock_hass.state = CoreState.running
+    await coordinator._async_update_data()
+    assert mock_entry.async_create_background_task.call_count == 1
 
 
 async def test_refresh_static_success_calls_refresh_if_stale(coordinator, mock_cache):

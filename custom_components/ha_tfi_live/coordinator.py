@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import CoreState, HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from nta_gtfs import (
@@ -78,7 +78,14 @@ class TfiLiveCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             UpdateFailed: On any other HTTP error, network error, or parse
                 failure.
         """
-        self.async_schedule_static_refresh()
+        # Never schedule the memory-heavy static load before the first
+        # successful refresh — a setup-retry loop would re-trigger it on
+        # every retry and OOM-kill low-memory hosts (#100).  After that,
+        # schedule even when the RT fetch below fails so schedule data
+        # stays fresh through an RT feed outage.
+        first_success_pending = self._last_successful_fetch is None
+        if not first_success_pending:
+            self.async_schedule_static_refresh()
 
         try:
             trip_updates = await self._rt_client.async_fetch_trip_updates()
@@ -130,6 +137,10 @@ class TfiLiveCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._last_successful_fetch = datetime.now(UTC)
         self._last_error_key = None
 
+        # Covers the first successful refresh, which the guard above skips.
+        if first_success_pending:
+            self.async_schedule_static_refresh()
+
         return {"entities": entities}
 
     def async_schedule_static_refresh(self) -> None:
@@ -139,8 +150,14 @@ class TfiLiveCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         download and parse, so it is never awaited inline — the refresh runs
         as a config-entry background task and sensors pick up the schedule
         data on the next coordinator update after it completes.  Does nothing
-        when the data is still fresh or a refresh is already in flight.
+        when the data is still fresh, a refresh is already in flight, or HA
+        is still starting up — the load peaks memory usage and has OOM-killed
+        HA core on low-memory hosts when run during startup (#100); the next
+        coordinator update after startup completes picks it up instead.
         """
+        if self.hass.state is not CoreState.running:
+            return
+
         task = self._static_refresh_task
         if task is not None and not task.done():
             return

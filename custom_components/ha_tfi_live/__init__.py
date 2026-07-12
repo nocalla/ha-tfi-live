@@ -85,8 +85,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: TfiLiveConfigEntry) -> b
     Creates the static GTFS cache and coordinator, stores the coordinator on
     ``entry.runtime_data``, and forwards setup to the sensor platform.  The
     static GTFS archive is downloaded and parsed in a background task
-    scheduled by the coordinator's first refresh, so setup completes quickly
-    and sensors run on real-time data alone until the schedule data arrives.
+    scheduled only after a successful coordinator refresh, and only once HA
+    has finished starting (#100), so setup completes quickly and sensors run
+    on real-time data alone until the schedule data arrives.
 
     Args:
         hass: The Home Assistant instance.
