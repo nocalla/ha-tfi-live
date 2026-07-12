@@ -1,9 +1,8 @@
 """Tests for custom_components.ha_tfi_live.config_flow.
 
-Covers acceptance criteria AC 18 (re-auth preserves config), AC 19 (step 1
-required field validation), AC 20 (step 1 URL validation), AC 21 (step 2
-required field validation), AC 22 (step 2 direction_id validation), and
-AC 23 (repeated sensor addition).
+Covers re-auth preserving config, step 1 required field and URL validation,
+step 2 required field and direction_id validation, and repeated sensor
+addition.
 
 Also covers issue #27 (API probe during step 1), issue #34 (reconfigure flow
 and options flow).
@@ -131,12 +130,12 @@ def flow(mock_hass: MagicMock) -> TfiLiveConfigFlow:
 
 
 # ---------------------------------------------------------------------------
-# Step 1 — AC 19: required field validation (api_key)
+# Step 1 — required field validation (api_key)
 # ---------------------------------------------------------------------------
 
 
 async def test_step1_empty_api_key_returns_error(flow: TfiLiveConfigFlow) -> None:
-    """AC 19: step 1 with api_key='' returns FORM and errors['api_key']=='required'."""
+    """Step 1 with api_key='' returns FORM and errors['api_key']=='required'."""
     # Arrange
     user_input = {**VALID_STEP1, CONF_API_KEY: ""}
 
@@ -151,7 +150,7 @@ async def test_step1_empty_api_key_returns_error(flow: TfiLiveConfigFlow) -> Non
 async def test_step1_whitespace_api_key_returns_error(
     flow: TfiLiveConfigFlow,
 ) -> None:
-    """AC 19: step 1 with api_key='   ' (whitespace only) is treated as empty."""
+    """Step 1 with api_key='   ' (whitespace only) is treated as empty."""
     # Arrange
     user_input = {**VALID_STEP1, CONF_API_KEY: "   "}
 
@@ -164,12 +163,12 @@ async def test_step1_whitespace_api_key_returns_error(
 
 
 # ---------------------------------------------------------------------------
-# Step 1 — AC 20: URL validation
+# Step 1 — URL validation
 # ---------------------------------------------------------------------------
 
 
 async def test_step1_invalid_trip_url(flow: TfiLiveConfigFlow) -> None:
-    """AC 20: step 1 with trip_update_url='not-a-url' returns invalid_url error."""
+    """Step 1 with trip_update_url='not-a-url' returns invalid_url error."""
     # Arrange
     user_input = {**VALID_STEP1, CONF_TRIP_UPDATE_URL: "not-a-url"}
 
@@ -182,7 +181,7 @@ async def test_step1_invalid_trip_url(flow: TfiLiveConfigFlow) -> None:
 
 
 async def test_step1_invalid_static_url(flow: TfiLiveConfigFlow) -> None:
-    """AC 20: step 1 with static_gtfs_url='not-a-url' returns invalid_url error."""
+    """Step 1 with static_gtfs_url='not-a-url' returns invalid_url error."""
     # Arrange
     user_input = {**VALID_STEP1, CONF_STATIC_GTFS_URL: "not-a-url"}
 
@@ -219,7 +218,7 @@ def _make_mock_session(status: int = 200) -> MagicMock:
 
 
 async def test_step1_valid_advances_to_sensor(flow: TfiLiveConfigFlow) -> None:
-    """AC 19/20: valid step 1 input advances to the sensor form (step_id='sensor')."""
+    """Valid step 1 input advances to the sensor form (step_id='sensor')."""
     # Arrange — mock the probe so no real HTTP call is made
     mock_session = _make_mock_session(status=200)
     with patch(
@@ -234,7 +233,7 @@ async def test_step1_valid_advances_to_sensor(flow: TfiLiveConfigFlow) -> None:
 
 
 async def test_step1_no_network_call(flow: TfiLiveConfigFlow) -> None:
-    """AC 19/20: step 1 with validation errors must not make any HTTP calls."""
+    """Step 1 with validation errors must not make any HTTP calls."""
 
     def _raise(*args: object, **kwargs: object) -> None:
         raise AssertionError("HTTP call made during config flow step 1")
@@ -312,12 +311,12 @@ async def test_step1_http_500_returns_cannot_connect(flow: TfiLiveConfigFlow) ->
 
 
 # ---------------------------------------------------------------------------
-# Step 2 — AC 21: required field validation
+# Step 2 — required field validation
 # ---------------------------------------------------------------------------
 
 
 async def test_step2_empty_name_returns_error(flow: TfiLiveConfigFlow) -> None:
-    """AC 21: step 2 with name='' returns FORM and errors['name']=='required'."""
+    """Step 2 with name='' returns FORM and errors['name']=='required'."""
     # Arrange
     flow._config = dict(_PREFILLED_CONFIG, **{CONF_SENSORS: []})
     user_input = {**VALID_STEP2, "name": ""}
@@ -331,7 +330,7 @@ async def test_step2_empty_name_returns_error(flow: TfiLiveConfigFlow) -> None:
 
 
 async def test_step2_empty_stop_id_returns_error(flow: TfiLiveConfigFlow) -> None:
-    """AC 21: step 2 with stop_id='' returns FORM and errors['stop_id']=='required'."""
+    """Step 2 with stop_id='' returns FORM and errors['stop_id']=='required'."""
     # Arrange
     flow._config = dict(_PREFILLED_CONFIG, **{CONF_SENSORS: []})
     user_input = {**VALID_STEP2, CONF_STOP_ID: ""}
@@ -345,7 +344,7 @@ async def test_step2_empty_stop_id_returns_error(flow: TfiLiveConfigFlow) -> Non
 
 
 async def test_step2_empty_route_id_returns_error(flow: TfiLiveConfigFlow) -> None:
-    """AC 21: empty route_id returns FORM with errors['route_id']=='required'."""
+    """Empty route_id returns FORM with errors['route_id']=='required'."""
     # Arrange
     flow._config = dict(_PREFILLED_CONFIG, **{CONF_SENSORS: []})
     user_input = {**VALID_STEP2, CONF_ROUTE_ID: ""}
@@ -359,12 +358,12 @@ async def test_step2_empty_route_id_returns_error(flow: TfiLiveConfigFlow) -> No
 
 
 # ---------------------------------------------------------------------------
-# Step 2 — AC 22: direction_id validation
+# Step 2 — direction_id validation
 # ---------------------------------------------------------------------------
 
 
 async def test_step2_direction_id_2_returns_error(flow: TfiLiveConfigFlow) -> None:
-    """AC 22: direction_id='2' (out of range) returns invalid_direction error."""
+    """Direction_id='2' (out of range) returns invalid_direction error."""
     # Arrange
     flow._config = dict(_PREFILLED_CONFIG, **{CONF_SENSORS: []})
     user_input = {**VALID_STEP2, CONF_DIRECTION_ID: "2"}
@@ -380,7 +379,7 @@ async def test_step2_direction_id_2_returns_error(flow: TfiLiveConfigFlow) -> No
 async def test_step2_direction_id_non_integer_returns_error(
     flow: TfiLiveConfigFlow,
 ) -> None:
-    """AC 22: direction_id='abc' (non-integer) returns invalid_direction error."""
+    """Direction_id='abc' (non-integer) returns invalid_direction error."""
     # Arrange
     flow._config = dict(_PREFILLED_CONFIG, **{CONF_SENSORS: []})
     user_input = {**VALID_STEP2, CONF_DIRECTION_ID: "abc"}
@@ -394,7 +393,7 @@ async def test_step2_direction_id_non_integer_returns_error(
 
 
 async def test_step2_direction_id_0_accepted(flow: TfiLiveConfigFlow) -> None:
-    """AC 22: direction_id='0' is a valid value — no direction_id error raised."""
+    """Direction_id='0' is a valid value — no direction_id error raised."""
     # Arrange
     flow._config = dict(_PREFILLED_CONFIG, **{CONF_SENSORS: []})
     user_input = {**VALID_STEP2, CONF_DIRECTION_ID: "0"}
@@ -408,7 +407,7 @@ async def test_step2_direction_id_0_accepted(flow: TfiLiveConfigFlow) -> None:
 
 
 async def test_step2_direction_id_1_accepted(flow: TfiLiveConfigFlow) -> None:
-    """AC 22: direction_id='1' is a valid value — no direction_id error raised."""
+    """Direction_id='1' is a valid value — no direction_id error raised."""
     # Arrange
     flow._config = dict(_PREFILLED_CONFIG, **{CONF_SENSORS: []})
     user_input = {**VALID_STEP2, CONF_DIRECTION_ID: "1"}
@@ -422,12 +421,12 @@ async def test_step2_direction_id_1_accepted(flow: TfiLiveConfigFlow) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Step 2 — AC 23: repeated sensor addition
+# Step 2 — repeated sensor addition
 # ---------------------------------------------------------------------------
 
 
 async def test_step2_repeated_addition(flow: TfiLiveConfigFlow) -> None:
-    """AC 23: two sequential valid step 2 submissions produce two sensor entries."""
+    """Two sequential valid step 2 submissions produce two sensor entries."""
     # Arrange
     flow._config = {
         CONF_API_KEY: "k",
@@ -451,7 +450,7 @@ async def test_step2_repeated_addition(flow: TfiLiveConfigFlow) -> None:
 async def test_step2_repeated_addition_sensor_names_preserved(
     flow: TfiLiveConfigFlow,
 ) -> None:
-    """AC 23: each sensor config entry records the name given at submission time."""
+    """Each sensor config entry records the name given at submission time."""
     # Arrange
     flow._config = {
         CONF_API_KEY: "k",
@@ -472,7 +471,7 @@ async def test_step2_repeated_addition_sensor_names_preserved(
 async def test_step2_add_another_loops_back_to_sensor_form(
     flow: TfiLiveConfigFlow,
 ) -> None:
-    """AC 23: async_step_add_another presents the sensor form (step_id='sensor')."""
+    """Async_step_add_another presents the sensor form (step_id='sensor')."""
     # Arrange
     flow._config = dict(_PREFILLED_CONFIG, **{CONF_SENSORS: []})
 
@@ -488,7 +487,7 @@ async def test_step2_add_another_loops_back_to_sensor_form(
 async def test_step2_finish_creates_entry_with_all_sensors(
     flow: TfiLiveConfigFlow,
 ) -> None:
-    """AC 23: async_step_finish creates a config entry whose data contains sensors."""
+    """Async_step_finish creates a config entry whose data contains sensors."""
     # Arrange — pre-populate two sensors
     flow._config = {
         CONF_API_KEY: "k",
@@ -510,7 +509,7 @@ async def test_step2_finish_creates_entry_with_all_sensors(
 
 
 async def test_step2_no_network_call(flow: TfiLiveConfigFlow) -> None:
-    """AC 21: step 2 must not make any HTTP calls during validation."""
+    """Step 2 must not make any HTTP calls during validation."""
     # Arrange
     flow._config = dict(_PREFILLED_CONFIG, **{CONF_SENSORS: []})
 
@@ -527,14 +526,14 @@ async def test_step2_no_network_call(flow: TfiLiveConfigFlow) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Re-auth flow — AC 18
+# Re-auth flow
 # ---------------------------------------------------------------------------
 
 
 async def test_reauth_preserves_other_config(
     flow: TfiLiveConfigFlow, mock_hass: MagicMock
 ) -> None:
-    """AC 18: re-auth updates only api_key; all other config keys are unchanged."""
+    """Re-auth updates only api_key; all other config keys are unchanged."""
     # Arrange
     existing_data = {
         CONF_API_KEY: "old-key",
@@ -570,7 +569,7 @@ async def test_reauth_preserves_other_config(
 async def test_reauth_triggers_reload(
     flow: TfiLiveConfigFlow, mock_hass: MagicMock
 ) -> None:
-    """AC 18: after successful re-auth, async_reload is called for the entry."""
+    """After successful re-auth, async_reload is called for the entry."""
     # Arrange
     mock_entry = MagicMock()
     mock_entry.data = {
@@ -592,7 +591,7 @@ async def test_reauth_triggers_reload(
 
 
 async def test_reauth_empty_api_key_returns_error(flow: TfiLiveConfigFlow) -> None:
-    """AC 19 (re-auth path): submitting empty api_key returns form error 'required'."""
+    """Submitting empty api_key returns form error 'required'."""
     # Arrange — _entry must be set as if async_step_reauth has already run
     mock_entry = MagicMock()
     mock_entry.data = {
@@ -614,7 +613,7 @@ async def test_reauth_empty_api_key_returns_error(flow: TfiLiveConfigFlow) -> No
 async def test_reauth_whitespace_api_key_returns_error(
     flow: TfiLiveConfigFlow,
 ) -> None:
-    """AC 19 (re-auth path): whitespace-only api_key is treated as empty."""
+    """Whitespace-only api_key is treated as empty."""
     # Arrange
     mock_entry = MagicMock()
     mock_entry.data = {CONF_API_KEY: "old"}
@@ -629,7 +628,7 @@ async def test_reauth_whitespace_api_key_returns_error(
 
 
 async def test_reauth_confirm_no_input_shows_form(flow: TfiLiveConfigFlow) -> None:
-    """AC 18: calling async_step_reauth_confirm(None) renders the form."""
+    """Calling async_step_reauth_confirm(None) renders the form."""
     # Act
     result = await flow.async_step_reauth_confirm(None)
 
@@ -703,7 +702,7 @@ async def test_step2_initial_render_returns_form(flow: TfiLiveConfigFlow) -> Non
 async def test_step2_valid_submission_stores_sensor_config(
     flow: TfiLiveConfigFlow,
 ) -> None:
-    """AC 21/23: a valid step 2 submission appends the correct dict to _config."""
+    """A valid step 2 submission appends the correct dict to _config."""
     # Arrange
     flow._config = dict(_PREFILLED_CONFIG, **{CONF_SENSORS: []})
     user_input = {
@@ -730,7 +729,7 @@ async def test_step2_valid_submission_stores_sensor_config(
 async def test_step2_empty_direction_id_stored_as_none(
     flow: TfiLiveConfigFlow,
 ) -> None:
-    """AC 22: omitting direction_id stores None (not empty string) in the config."""
+    """Omitting direction_id stores None (not empty string) in the config."""
     # Arrange
     flow._config = dict(_PREFILLED_CONFIG, **{CONF_SENSORS: []})
     user_input = {**VALID_STEP2, CONF_DIRECTION_ID: ""}
@@ -745,7 +744,7 @@ async def test_step2_empty_direction_id_stored_as_none(
 async def test_step2_empty_operator_id_stored_as_none(
     flow: TfiLiveConfigFlow,
 ) -> None:
-    """AC 21: omitting operator_id stores None (not empty string) in the config."""
+    """Omitting operator_id stores None (not empty string) in the config."""
     # Arrange
     flow._config = dict(_PREFILLED_CONFIG, **{CONF_SENSORS: []})
     user_input = {**VALID_STEP2, "operator_id": ""}
@@ -765,7 +764,7 @@ async def test_step2_empty_operator_id_stored_as_none(
 async def test_step1_both_urls_invalid_reports_both_errors(
     flow: TfiLiveConfigFlow,
 ) -> None:
-    """AC 20: when both URLs are invalid, both field errors are present."""
+    """When both URLs are invalid, both field errors are present."""
     # Arrange
     user_input = {
         CONF_API_KEY: "key",

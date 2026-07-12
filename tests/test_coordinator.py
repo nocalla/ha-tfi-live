@@ -1,9 +1,9 @@
 """Tests for custom_components.ha_tfi_live.coordinator.TfiLiveCoordinator.
 
-Covers: update interval (AC 14), successful fetch parsing, last-successful-fetch
-tracking, GtfsRtFetchError handling and log deduplication (AC 15, 16),
-GtfsRtAuthError re-auth trigger and ERROR log (AC 17), GtfsRtParseError handling
-and ERROR log (AC 26), and direction_id string coercion.
+Covers: update interval, successful fetch parsing, last-successful-fetch
+tracking, GtfsRtFetchError handling and log deduplication,
+GtfsRtAuthError re-auth trigger and ERROR log, GtfsRtParseError handling
+and ERROR log, and direction_id string coercion.
 
 All interactions with GtfsRtClient are mocked — no live network calls are made.
 HomeAssistant and ConfigEntry are replaced with MagicMock objects.

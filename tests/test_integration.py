@@ -23,10 +23,10 @@ Test cases
 ----------
 TC-1  Happy path: static GTFS load succeeds + valid RT feed → setup completes,
       coordinator stored in entry.runtime_data, sensor platform forwarded.
-TC-2  AC 10: StaticGtfsLoadError during async_load does not abort setup —
+TC-2  StaticGtfsLoadError during async_load does not abort setup —
       coordinator is still stored in entry.runtime_data after setup.
 TC-3  TC-2 warning: StaticGtfsLoadError during async_load logs a WARNING.
-TC-4  AC 17 end-to-end: GtfsRtAuthError during first refresh propagates
+TC-4  GtfsRtAuthError during first refresh propagates
       ConfigEntryAuthFailed and triggers async_start_reauth.
 TC-5  Unload: after a successful setup, async_unload_entry returns True.
 """
@@ -217,12 +217,12 @@ async def test_setup_entry_happy_path_stores_coordinator_and_forwards_sensor() -
 
 
 # ---------------------------------------------------------------------------
-# TC-2: AC 10 — StaticGtfsLoadError does not abort setup
+# TC-2: StaticGtfsLoadError does not abort setup
 # ---------------------------------------------------------------------------
 
 
 async def test_setup_entry_static_gtfs_load_error_does_not_abort_setup() -> None:
-    """TC-2 (AC 10): StaticGtfsLoadError from async_load is swallowed; setup completes.
+    """TC-2: StaticGtfsLoadError from async_load is swallowed; setup completes.
 
     Arrange: StaticGtfsClient.async_load raises StaticGtfsLoadError;
         GtfsRtClient.async_fetch_trip_updates returns valid data.
@@ -270,12 +270,12 @@ async def test_setup_entry_static_gtfs_load_error_logs_warning(caplog) -> None:
 
 
 # ---------------------------------------------------------------------------
-# TC-4: AC 17 — GtfsRtAuthError propagates ConfigEntryAuthFailed
+# TC-4: GtfsRtAuthError propagates ConfigEntryAuthFailed
 # ---------------------------------------------------------------------------
 
 
 async def test_setup_entry_gtfs_rt_auth_error_raises_config_entry_auth_failed() -> None:
-    """TC-4 (AC 17): GtfsRtAuthError during first refresh propagates auth failure.
+    """TC-4: GtfsRtAuthError during first refresh propagates auth failure.
 
     Arrange: StaticGtfsClient.async_load succeeds; GtfsRtClient raises
         GtfsRtAuthError.

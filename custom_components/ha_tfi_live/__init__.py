@@ -27,7 +27,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: TfiLiveConfigEntry) -> b
     Creates the static GTFS cache and coordinator, stores the coordinator on
     ``entry.runtime_data``, and forwards setup to the sensor platform.  Static
     GTFS load failures are logged and swallowed — the integration continues
-    without static schedule data rather than blocking setup entirely (AC 10).
+    without static schedule data rather than blocking setup entirely.
 
     Args:
         hass: The Home Assistant instance.
