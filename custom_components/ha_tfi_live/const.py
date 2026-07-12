@@ -12,7 +12,7 @@ DOMAIN: Final[str] = "ha_tfi_live"
 
 # Default feed URLs (pre-fill config flow step 1)
 DEFAULT_TRIP_UPDATE_URL: Final[str] = (
-    "https://gtfsr.transportforireland.ie/v2/TripUpdates?format=json"
+    "https://api.nationaltransport.ie/gtfsr/v2/TripUpdates?format=json"
 )
 DEFAULT_STATIC_GTFS_URL: Final[str] = (
     "https://www.transportforireland.ie/transitData/Data/GTFS_Realtime.zip"

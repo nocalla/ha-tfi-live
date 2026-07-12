@@ -17,7 +17,7 @@ import urllib.request
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-_FEED_URL = "https://gtfsr.transportforireland.ie/v2/TripUpdates?format=json"
+_FEED_URL = "https://api.nationaltransport.ie/gtfsr/v2/TripUpdates?format=json"
 _DUBLIN_TZ = ZoneInfo("Europe/Dublin")
 
 

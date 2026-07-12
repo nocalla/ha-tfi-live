@@ -8,6 +8,7 @@ updating credentials, and the options flow for adding sensors after setup.
 
 from __future__ import annotations
 
+import logging
 import urllib.parse
 from typing import Any
 
@@ -31,6 +32,8 @@ from .const import (
     DEFAULT_TRIP_UPDATE_URL,
     DOMAIN,
 )
+
+_LOGGER = logging.getLogger(__name__)
 
 _SENSOR_NAME_KEY = "name"
 
@@ -88,8 +91,14 @@ async def _probe_feed(
             if resp.status == 401:
                 errors["base"] = "invalid_auth"
             elif resp.status >= 400:
+                _LOGGER.warning(
+                    "GTFS-RT feed probe of %s returned HTTP %s",
+                    trip_update_url,
+                    resp.status,
+                )
                 errors["base"] = "cannot_connect"
-    except Exception:
+    except Exception as exc:
+        _LOGGER.warning("GTFS-RT feed probe of %s failed: %s", trip_update_url, exc)
         errors["base"] = "cannot_connect"
 
 

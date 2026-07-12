@@ -45,7 +45,7 @@ from custom_components.ha_tfi_live.const import (
 VALID_STEP1 = {
     CONF_API_KEY: "my-api-key",
     CONF_TRIP_UPDATE_URL: (
-        "https://gtfsr.transportforireland.ie/v2/TripUpdates?format=json"
+        "https://api.nationaltransport.ie/gtfsr/v2/TripUpdates?format=json"
     ),
     CONF_STATIC_GTFS_URL: (
         "https://www.transportforireland.ie/transitData/Data/GTFS_Realtime.zip"
