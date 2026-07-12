@@ -260,7 +260,7 @@ class TfiLiveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self._config[CONF_SENSORS].append(sensor_config)
 
                 return self.async_show_menu(
-                    step_id="sensor",
+                    step_id="sensor_menu",
                     menu_options=[_MENU_ADD_ANOTHER, _MENU_FINISH],
                 )
 
@@ -533,7 +533,7 @@ class TfiLiveOptionsFlowHandler(config_entries.OptionsFlow):
                 self._new_sensors.append(sensor_config)
 
                 return self.async_show_menu(
-                    step_id="sensor",
+                    step_id="sensor_menu",
                     menu_options=[_MENU_ADD_ANOTHER, _MENU_FINISH],
                 )
 

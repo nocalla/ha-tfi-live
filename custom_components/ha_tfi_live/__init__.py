@@ -6,7 +6,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from nta_gtfs import GtfsRtClient, StaticGtfsClient, StaticGtfsLoadError
+from nta_gtfs import GtfsRtClient, StaticGtfsClient
 
 from .const import (
     CONF_API_KEY,
@@ -25,9 +25,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: TfiLiveConfigEntry) -> b
     """Set up TFI Live from a config entry.
 
     Creates the static GTFS cache and coordinator, stores the coordinator on
-    ``entry.runtime_data``, and forwards setup to the sensor platform.  Static
-    GTFS load failures are logged and swallowed — the integration continues
-    without static schedule data rather than blocking setup entirely.
+    ``entry.runtime_data``, and forwards setup to the sensor platform.  The
+    static GTFS archive is downloaded and parsed in a background task
+    scheduled by the coordinator's first refresh, so setup completes quickly
+    and sensors run on real-time data alone until the schedule data arrives.
 
     Args:
         hass: The Home Assistant instance.
@@ -55,14 +56,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: TfiLiveConfigEntry) -> b
         api_key=entry.data[CONF_API_KEY],
         session=session,
     )
-
-    try:
-        await cache.async_load()
-    except StaticGtfsLoadError:
-        _logger.warning(
-            "Static GTFS load failed -- route names will be unavailable until the"
-            " next successful load"
-        )
 
     coordinator = TfiLiveCoordinator(hass, entry, rt_client, cache)
     await coordinator.async_config_entry_first_refresh()

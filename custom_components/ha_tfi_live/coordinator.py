@@ -1,5 +1,6 @@
 """DataUpdateCoordinator for the TFI Live integration."""
 
+import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -14,9 +15,10 @@ from nta_gtfs import (
     GtfsRtFetchError,
     GtfsRtParseError,
     StaticGtfsClient,
+    StaticGtfsLoadError,
 )
 
-from .const import DOMAIN, UPDATE_INTERVAL_SECONDS
+from .const import DOMAIN, STATIC_GTFS_REFRESH_HOURS, UPDATE_INTERVAL_SECONDS
 
 _logger = logging.getLogger(__name__)
 
@@ -50,6 +52,7 @@ class TfiLiveCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._cache = cache
         self._last_successful_fetch: datetime | None = None
         self._last_error_key: str | None = None
+        self._static_refresh_task: asyncio.Task[None] | None = None
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch and parse the GTFS-RT trip updates JSON.
@@ -75,6 +78,8 @@ class TfiLiveCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             UpdateFailed: On any other HTTP error, network error, or parse
                 failure.
         """
+        self.async_schedule_static_refresh()
+
         try:
             trip_updates = await self._rt_client.async_fetch_trip_updates()
         except GtfsRtAuthError as exc:
@@ -126,6 +131,49 @@ class TfiLiveCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._last_error_key = None
 
         return {"entities": entities}
+
+    def async_schedule_static_refresh(self) -> None:
+        """Schedule a background refresh of the static GTFS data when stale.
+
+        The static GTFS archive is large (~80 MB) and takes minutes to
+        download and parse, so it is never awaited inline — the refresh runs
+        as a config-entry background task and sensors pick up the schedule
+        data on the next coordinator update after it completes.  Does nothing
+        when the data is still fresh or a refresh is already in flight.
+        """
+        task = self._static_refresh_task
+        if task is not None and not task.done():
+            return
+
+        loaded_at = self._cache.loaded_at
+        if loaded_at is not None and datetime.now(UTC) - loaded_at < timedelta(
+            hours=STATIC_GTFS_REFRESH_HOURS
+        ):
+            return
+
+        self._static_refresh_task = self._config_entry.async_create_background_task(
+            self.hass,
+            self._async_refresh_static(),
+            name=f"{DOMAIN} static GTFS refresh",
+        )
+
+    async def _async_refresh_static(self) -> None:
+        """Refresh the static GTFS cache, logging instead of raising on failure.
+
+        Failures are logged and swallowed so a broken static feed never takes
+        down the coordinator — sensors keep working from real-time data alone
+        and the refresh is retried on a later coordinator update.
+        """
+        try:
+            await self._cache.async_refresh_if_stale()
+        except StaticGtfsLoadError as exc:
+            _logger.warning(
+                "Static GTFS load failed: %s — schedule data unavailable until"
+                " the next successful load",
+                exc,
+            )
+        else:
+            _logger.info("Static GTFS data loaded")
 
     @property
     def last_successful_fetch(self) -> datetime | None:

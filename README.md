@@ -119,7 +119,7 @@ automation:
 ## Data Updates
 
 - **Real-time feed:** polled every 60 seconds from the NTA GTFS-RT endpoint — the maximum rate permitted by the NTA fair usage policy (see below).
-- **Static schedule:** downloaded at startup and refreshed every 24 hours. Route names and scheduled times are sourced from this data.
+- **Static schedule:** downloaded in the background after startup and refreshed every 24 hours. Route names and scheduled times are sourced from this data, so they may be missing for the first few minutes after setup or a restart while the ~80 MB archive downloads and parses.
 - **Availability:** a sensor goes unavailable if no successful feed fetch has occurred within the past 3 minutes. It recovers automatically when the feed becomes reachable again.
 
 ## Data Licence, Attribution and Fair Usage

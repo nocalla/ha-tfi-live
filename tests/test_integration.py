@@ -23,9 +23,10 @@ Test cases
 ----------
 TC-1  Happy path: static GTFS load succeeds + valid RT feed → setup completes,
       coordinator stored in entry.runtime_data, sensor platform forwarded.
-TC-2  StaticGtfsLoadError during async_load does not abort setup —
-      coordinator is still stored in entry.runtime_data after setup.
-TC-3  TC-2 warning: StaticGtfsLoadError during async_load logs a WARNING.
+TC-2  Static GTFS load is scheduled as a background task, never awaited
+      inline during setup; running the task performs the load.
+TC-3  StaticGtfsLoadError in the background load logs a WARNING and is
+      swallowed — the entry stays set up.
 TC-4  GtfsRtAuthError during first refresh propagates
       ConfigEntryAuthFailed and triggers async_start_reauth.
 TC-5  Unload: after a successful setup, async_unload_entry returns True.
@@ -139,6 +140,15 @@ def _make_entry(*, sensors: list[dict] | None = None) -> MagicMock:
         CONF_STATIC_GTFS_URL: _DUMMY_STATIC_GTFS_URL,
         CONF_SENSORS: sensors,
     }
+    # Capture background coroutines scheduled by the coordinator (the static
+    # GTFS load) on entry.background_coros so tests can run or discard them.
+    entry.background_coros = []
+
+    def _capture_background_task(hass, coro, name=None):
+        entry.background_coros.append(coro)
+        return MagicMock()
+
+    entry.async_create_background_task = MagicMock(side_effect=_capture_background_task)
     return entry
 
 
@@ -161,8 +171,8 @@ def _base_patches(
             raise this exception.  Takes precedence over ``rt_return_value``.
 
     Yields:
-        None — caller uses ``async_setup_entry`` / ``async_unload_entry``
-        inside the ``with`` block.
+        Dict with the ``"static"`` and ``"rt"`` AsyncMocks so callers can
+        assert on await counts.
     """
     if rt_return_value is None and rt_side_effect is None:
         rt_return_value = [_VALID_TRIP_UPDATE]
@@ -179,7 +189,7 @@ def _base_patches(
         patch.object(StaticGtfsClient, "async_load", static_mock),
         patch.object(GtfsRtClient, "async_fetch_trip_updates", rt_mock),
     ):
-        yield
+        yield {"static": static_mock, "rt": rt_mock}
 
 
 # ---------------------------------------------------------------------------
@@ -208,6 +218,8 @@ async def test_setup_entry_happy_path_stores_coordinator_and_forwards_sensor() -
             result = await async_setup_entry(hass, entry)
     finally:
         current_entry.reset(token)
+        for coro in entry.background_coros:
+            coro.close()
 
     assert result is True
     assert entry.runtime_data is not None
@@ -217,19 +229,48 @@ async def test_setup_entry_happy_path_stores_coordinator_and_forwards_sensor() -
 
 
 # ---------------------------------------------------------------------------
-# TC-2: StaticGtfsLoadError does not abort setup
+# TC-2: static GTFS load runs in a background task, not inline
 # ---------------------------------------------------------------------------
 
 
-async def test_setup_entry_static_gtfs_load_error_does_not_abort_setup() -> None:
-    """TC-2: StaticGtfsLoadError from async_load is swallowed; setup completes.
+async def test_setup_entry_schedules_static_load_in_background() -> None:
+    """TC-2: Setup schedules the static GTFS load instead of awaiting it.
 
-    Arrange: StaticGtfsClient.async_load raises StaticGtfsLoadError;
-        GtfsRtClient.async_fetch_trip_updates returns valid data.
-    Act: call async_setup_entry.
+    Arrange: hass and entry as in TC-1.
+    Act: call async_setup_entry, then run the captured background coroutine.
     Assert:
-        - does not raise
-        - coordinator is still stored at entry.runtime_data
+        - setup returns True with async_load never awaited inline
+        - exactly one background task was scheduled
+        - running the scheduled coroutine performs the static load
+    """
+    hass = _make_hass()
+    entry = _make_entry()
+
+    token = current_entry.set(entry)
+    try:
+        with _base_patches() as mocks:
+            result = await async_setup_entry(hass, entry)
+
+            assert result is True
+            assert mocks["static"].await_count == 0
+            assert entry.async_create_background_task.call_count == 1
+
+            await entry.background_coros[0]
+            assert mocks["static"].await_count == 1
+    finally:
+        current_entry.reset(token)
+
+
+# ---------------------------------------------------------------------------
+# TC-3: StaticGtfsLoadError in the background load logs a WARNING
+# ---------------------------------------------------------------------------
+
+
+async def test_background_static_load_error_logs_warning(caplog) -> None:
+    """TC-3: StaticGtfsLoadError in the background task logs a WARNING.
+
+    The failure must be swallowed by the background task — the entry stays
+    set up and running on real-time data alone.
     """
     hass = _make_hass()
     entry = _make_entry()
@@ -238,33 +279,15 @@ async def test_setup_entry_static_gtfs_load_error_does_not_abort_setup() -> None
     try:
         with _base_patches(static_load_side_effect=StaticGtfsLoadError("HTTP 500")):
             result = await async_setup_entry(hass, entry)
+
+            with caplog.at_level(
+                logging.WARNING, logger="custom_components.ha_tfi_live"
+            ):
+                await entry.background_coros[0]
     finally:
         current_entry.reset(token)
 
     assert result is True
-    assert entry.runtime_data is not None
-
-
-# ---------------------------------------------------------------------------
-# TC-3: StaticGtfsLoadError logs a WARNING
-# ---------------------------------------------------------------------------
-
-
-async def test_setup_entry_static_gtfs_load_error_logs_warning(caplog) -> None:
-    """TC-3: StaticGtfsLoadError during async_load emits a WARNING log entry."""
-    hass = _make_hass()
-    entry = _make_entry()
-
-    token = current_entry.set(entry)
-    try:
-        with _base_patches(static_load_side_effect=StaticGtfsLoadError("HTTP 500")):
-            with caplog.at_level(
-                logging.WARNING, logger="custom_components.ha_tfi_live"
-            ):
-                await async_setup_entry(hass, entry)
-    finally:
-        current_entry.reset(token)
-
     warnings = [r for r in caplog.records if r.levelname == "WARNING"]
     assert len(warnings) >= 1
 
@@ -294,6 +317,8 @@ async def test_setup_entry_gtfs_rt_auth_error_raises_config_entry_auth_failed() 
                 await async_setup_entry(hass, entry)
     finally:
         current_entry.reset(token)
+        for coro in entry.background_coros:
+            coro.close()
 
     entry.async_start_reauth.assert_called_once()
 
@@ -320,6 +345,8 @@ async def test_unload_entry_returns_true() -> None:
             await async_setup_entry(hass, entry)
     finally:
         current_entry.reset(token)
+        for coro in entry.background_coros:
+            coro.close()
 
     assert entry.runtime_data is not None
 

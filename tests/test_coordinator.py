@@ -10,7 +10,7 @@ HomeAssistant and ConfigEntry are replaced with MagicMock objects.
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -20,6 +20,7 @@ from nta_gtfs import (
     GtfsRtAuthError,
     GtfsRtFetchError,
     GtfsRtParseError,
+    StaticGtfsLoadError,
     StopTimeUpdate,
     TripUpdate,
 )
@@ -72,6 +73,12 @@ def mock_entry():
         "api_key": "test-key",
     }
     entry.entry_id = "test_entry_id"
+    # Close scheduled background coroutines so they never leak as
+    # "coroutine was never awaited" warnings; tests that need to run the
+    # coroutine override this side effect to capture it instead.
+    entry.async_create_background_task = MagicMock(
+        side_effect=lambda hass, coro, name=None: (coro.close(), MagicMock())[1]
+    )
     return entry
 
 
@@ -88,8 +95,15 @@ def mock_rt_client():
 
 @pytest.fixture
 def mock_cache():
-    """Return a MagicMock standing in for a StaticGtfsClient."""
-    return MagicMock()
+    """Return a MagicMock standing in for a StaticGtfsClient.
+
+    ``loaded_at`` defaults to now (fresh data) so tests exercising the
+    real-time fetch path do not trigger a background static refresh.
+    """
+    cache = MagicMock()
+    cache.loaded_at = datetime.now(UTC)
+    cache.async_refresh_if_stale = AsyncMock()
+    return cache
 
 
 @pytest.fixture
@@ -309,3 +323,92 @@ async def test_direction_id_preserved_as_string(coordinator):
     direction_id = result["entities"][0]["direction_id"]
     assert direction_id == "0"
     assert isinstance(direction_id, str)
+
+
+# ---------------------------------------------------------------------------
+# Background static GTFS refresh scheduling
+# ---------------------------------------------------------------------------
+
+
+async def test_static_refresh_scheduled_when_never_loaded(
+    coordinator, mock_entry, mock_cache
+):
+    """A coordinator update schedules a background static load when unloaded."""
+    mock_cache.loaded_at = None
+
+    await coordinator._async_update_data()
+
+    assert mock_entry.async_create_background_task.call_count == 1
+
+
+async def test_static_refresh_scheduled_when_stale(coordinator, mock_entry, mock_cache):
+    """A coordinator update schedules a background refresh of stale data."""
+    mock_cache.loaded_at = datetime.now(UTC) - timedelta(hours=25)
+
+    await coordinator._async_update_data()
+
+    assert mock_entry.async_create_background_task.call_count == 1
+
+
+async def test_static_refresh_skipped_when_fresh(coordinator, mock_entry, mock_cache):
+    """No background refresh is scheduled while the static data is fresh."""
+    await coordinator._async_update_data()
+
+    mock_entry.async_create_background_task.assert_not_called()
+
+
+async def test_static_refresh_not_rescheduled_while_in_flight(
+    coordinator, mock_entry, mock_cache
+):
+    """A second update does not schedule a refresh while one is running."""
+    mock_cache.loaded_at = None
+    in_flight_task = MagicMock()
+    in_flight_task.done.return_value = False
+    mock_entry.async_create_background_task = MagicMock(
+        side_effect=lambda hass, coro, name=None: (coro.close(), in_flight_task)[1]
+    )
+
+    await coordinator._async_update_data()
+    await coordinator._async_update_data()
+
+    assert mock_entry.async_create_background_task.call_count == 1
+
+
+async def test_static_refresh_rescheduled_after_completion(
+    coordinator, mock_entry, mock_cache
+):
+    """A new refresh is scheduled when the previous task finished but the
+    data is still stale (i.e. the previous load failed)."""
+    mock_cache.loaded_at = None
+    done_task = MagicMock()
+    done_task.done.return_value = True
+    mock_entry.async_create_background_task = MagicMock(
+        side_effect=lambda hass, coro, name=None: (coro.close(), done_task)[1]
+    )
+
+    await coordinator._async_update_data()
+    await coordinator._async_update_data()
+
+    assert mock_entry.async_create_background_task.call_count == 2
+
+
+async def test_refresh_static_success_calls_refresh_if_stale(coordinator, mock_cache):
+    """_async_refresh_static delegates to the cache's stale-aware refresh."""
+    await coordinator._async_refresh_static()
+
+    mock_cache.async_refresh_if_stale.assert_awaited_once()
+
+
+async def test_refresh_static_failure_logs_warning_and_swallows(
+    coordinator, mock_cache, caplog
+):
+    """A StaticGtfsLoadError is logged as a WARNING and not propagated."""
+    mock_cache.async_refresh_if_stale = AsyncMock(
+        side_effect=StaticGtfsLoadError("HTTP 500")
+    )
+
+    with caplog.at_level(logging.WARNING, logger="custom_components.ha_tfi_live"):
+        await coordinator._async_refresh_static()
+
+    warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+    assert len(warnings) >= 1

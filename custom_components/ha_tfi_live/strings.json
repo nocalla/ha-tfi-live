@@ -19,6 +19,14 @@
           "operator_id": "Operator ID (optional)"
         }
       },
+      "sensor_menu": {
+        "title": "Sensor Added",
+        "description": "The sensor was added. Add another sensor, or finish setup.",
+        "menu_options": {
+          "add_another": "Add another sensor",
+          "finish": "Finish setup"
+        }
+      },
       "reauth_confirm": {
         "title": "Re-authenticate TFI Live",
         "data": {
@@ -45,6 +53,32 @@
       "reauth_successful": "Re-authentication was successful.",
       "already_configured": "This integration is already configured.",
       "reconfigure_successful": "Reconfiguration was successful."
+    }
+  },
+  "options": {
+    "step": {
+      "sensor": {
+        "title": "Add a Sensor",
+        "data": {
+          "name": "Sensor Name",
+          "stop_id": "Stop ID",
+          "route_id": "Route ID",
+          "direction_id": "Direction (0 or 1, leave blank for both)",
+          "operator_id": "Operator ID (optional)"
+        }
+      },
+      "sensor_menu": {
+        "title": "Sensor Added",
+        "description": "The sensor was added. Add another sensor, or save.",
+        "menu_options": {
+          "add_another": "Add another sensor",
+          "finish": "Save"
+        }
+      }
+    },
+    "error": {
+      "required": "This field is required.",
+      "invalid_direction": "Direction must be 0 or 1."
     }
   }
 }
