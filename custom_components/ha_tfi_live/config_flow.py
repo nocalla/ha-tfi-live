@@ -8,16 +8,17 @@ updating credentials, and the options flow for adding sensors after setup.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import urllib.parse
 from typing import Any
 
-import aiohttp
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.config_entries import ConfigEntry, ConfigFlowResult
 from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from nta_gtfs import GtfsRtAuthError, GtfsRtClient, GtfsRtParseError
 
 from .const import (
     CONF_API_KEY,
@@ -70,10 +71,14 @@ async def _probe_feed(
     api_key: str,
     errors: dict[str, str],
 ) -> None:
-    """Probe the GTFS-RT feed URL to validate the API key.
+    """Probe the GTFS-RT feed URL to validate the API key and feed format.
 
-    Makes a lightweight GET request to the trip update feed with the
-    supplied API key. Populates ``errors["base"]`` if the probe fails.
+    Fetches and parses the trip update feed through
+    :class:`nta_gtfs.GtfsRtClient` — the same client the coordinator uses —
+    so a URL that returns a non-protobuf body (e.g. one carrying
+    ``format=json``, issue #99) is rejected in the wizard rather than
+    failing on every refresh after setup. Populates ``errors["base"]``
+    if the probe fails.
 
     Args:
         hass: The Home Assistant instance used to obtain the HTTP client session.
@@ -81,22 +86,23 @@ async def _probe_feed(
         api_key: The NTA API key to include in the request header.
         errors: Mutable dict of form errors; ``"base"`` will be set on failure.
     """
-    session = async_get_clientsession(hass)
+    client = GtfsRtClient(
+        feed_url=trip_update_url,
+        api_key=api_key,
+        session=async_get_clientsession(hass),
+    )
     try:
-        async with session.get(
+        async with asyncio.timeout(10):
+            await client.async_fetch_trip_updates()
+    except GtfsRtAuthError:
+        errors["base"] = "invalid_auth"
+    except GtfsRtParseError as exc:
+        _LOGGER.warning(
+            "GTFS-RT feed probe of %s returned an unparseable feed: %s",
             trip_update_url,
-            headers={"x-api-key": api_key},
-            timeout=aiohttp.ClientTimeout(total=10),
-        ) as resp:
-            if resp.status == 401:
-                errors["base"] = "invalid_auth"
-            elif resp.status >= 400:
-                _LOGGER.warning(
-                    "GTFS-RT feed probe of %s returned HTTP %s",
-                    trip_update_url,
-                    resp.status,
-                )
-                errors["base"] = "cannot_connect"
+            exc,
+        )
+        errors["base"] = "cannot_parse"
     except Exception as exc:
         _LOGGER.warning("GTFS-RT feed probe of %s failed: %s", trip_update_url, exc)
         errors["base"] = "cannot_connect"
@@ -111,6 +117,9 @@ class TfiLiveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """
 
     VERSION = 1
+    # Minor version 2: trip update URLs no longer carry format=json (#99);
+    # async_migrate_entry in __init__ strips it from stored entries.
+    MINOR_VERSION = 2
 
     def __init__(self) -> None:
         """Initialise the config flow with an empty staged config."""

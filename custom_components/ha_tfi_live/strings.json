@@ -47,6 +47,7 @@
       "invalid_url": "Please enter a valid URL including scheme (https://).",
       "invalid_direction": "Direction must be 0 or 1.",
       "cannot_connect": "Unable to connect to the NTA feed.",
+      "cannot_parse": "The feed responded but is not a GTFS-RT protobuf feed — remove any format=json parameter from the URL.",
       "invalid_auth": "Invalid API key — authentication failed."
     },
     "abort": {

@@ -11,8 +11,11 @@ from typing import Final
 DOMAIN: Final[str] = "ha_tfi_live"
 
 # Default feed URLs (pre-fill config flow step 1)
+# NOTE: no query parameters — the NTA endpoint's default response is the
+# protobuf FeedMessage that nta_gtfs.GtfsRtClient expects. A `format=json`
+# parameter makes the API return JSON, which the client cannot parse (#99).
 DEFAULT_TRIP_UPDATE_URL: Final[str] = (
-    "https://api.nationaltransport.ie/gtfsr/v2/TripUpdates?format=json"
+    "https://api.nationaltransport.ie/gtfsr/v2/TripUpdates"
 )
 DEFAULT_STATIC_GTFS_URL: Final[str] = (
     "https://www.transportforireland.ie/transitData/Data/GTFS_Realtime.zip"

@@ -16,13 +16,13 @@ code ever regresses on the no-network constraint.
 from __future__ import annotations
 
 from collections.abc import Callable
-from contextlib import asynccontextmanager
+from contextlib import contextmanager
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import aiohttp
 import pytest
 from homeassistant.data_entry_flow import AbortFlow, FlowResultType
+from nta_gtfs import GtfsRtAuthError, GtfsRtFetchError, GtfsRtParseError
 
 from custom_components.ha_tfi_live.config_flow import (
     TfiLiveConfigFlow,
@@ -46,9 +46,7 @@ from custom_components.ha_tfi_live.const import (
 
 VALID_STEP1 = {
     CONF_API_KEY: "my-api-key",
-    CONF_TRIP_UPDATE_URL: (
-        "https://api.nationaltransport.ie/gtfsr/v2/TripUpdates?format=json"
-    ),
+    CONF_TRIP_UPDATE_URL: ("https://api.nationaltransport.ie/gtfsr/v2/TripUpdates"),
     CONF_STATIC_GTFS_URL: (
         "https://www.transportforireland.ie/transitData/Data/GTFS_Realtime.zip"
     ),
@@ -265,38 +263,43 @@ async def test_step1_invalid_static_url(flow: TfiLiveConfigFlow) -> None:
     assert result["errors"][CONF_STATIC_GTFS_URL] == "invalid_url"
 
 
-def _make_mock_session(status: int = 200) -> MagicMock:
-    """Build a mock aiohttp ClientSession whose GET returns the given HTTP status.
+@contextmanager
+def _patch_probe_client(side_effect: Exception | None = None):  # type: ignore[no-untyped-def]
+    """Patch the config flow's GtfsRtClient class with a probe mock.
+
+    Follows the project convention of mocking ``nta_gtfs.GtfsRtClient`` at
+    the class level rather than mocking raw aiohttp sessions.  The HTTP
+    session getter is also stubbed so no real ClientSession is created for
+    the mock hass instance.
 
     Args:
-        status: The HTTP status code the mock response should return.
+        side_effect: Exception raised by ``async_fetch_trip_updates``, or
+            ``None`` for a successful probe returning an empty feed.
 
-    Returns:
-        A MagicMock that replaces ``async_get_clientsession`` and whose
-        ``session.get(...)`` async-context-manager yields a response with
-        ``resp.status == status``.
+    Yields:
+        The mock client instance the flow's probe will use.
     """
-    mock_resp = MagicMock()
-    mock_resp.status = status
-
-    @asynccontextmanager
-    async def _get(*args: object, **kwargs: object):  # type: ignore[no-untyped-def]
-        """Async context manager yielding the mock response."""
-        yield mock_resp
-
-    mock_session = MagicMock()
-    mock_session.get = _get
-    return mock_session
+    client = MagicMock()
+    client.async_fetch_trip_updates = AsyncMock(
+        return_value=[], side_effect=side_effect
+    )
+    with (
+        patch(
+            "custom_components.ha_tfi_live.config_flow.async_get_clientsession",
+            return_value=MagicMock(),
+        ),
+        patch(
+            "custom_components.ha_tfi_live.config_flow.GtfsRtClient",
+            MagicMock(return_value=client),
+        ),
+    ):
+        yield client
 
 
 async def test_step1_valid_advances_to_sensor(flow: TfiLiveConfigFlow) -> None:
     """Valid step 1 input advances to the sensor form (step_id='sensor')."""
     # Arrange — mock the probe so no real HTTP call is made
-    mock_session = _make_mock_session(status=200)
-    with patch(
-        "custom_components.ha_tfi_live.config_flow.async_get_clientsession",
-        return_value=mock_session,
-    ):
+    with _patch_probe_client():
         result = await flow.async_step_user(VALID_STEP1)
 
     # Assert — step 1 calls async_step_sensor(None) which shows the sensor form
@@ -331,13 +334,9 @@ async def test_step1_no_network_call(flow: TfiLiveConfigFlow) -> None:
 
 
 async def test_step1_invalid_auth(flow: TfiLiveConfigFlow) -> None:
-    """Issue #27: step 1 probe returning 401 re-shows form with invalid_auth error."""
+    """Issue #27: step 1 probe auth failure re-shows form with invalid_auth error."""
     # Arrange
-    mock_session = _make_mock_session(status=401)
-    with patch(
-        "custom_components.ha_tfi_live.config_flow.async_get_clientsession",
-        return_value=mock_session,
-    ):
+    with _patch_probe_client(side_effect=GtfsRtAuthError("HTTP 401")):
         result = await flow.async_step_user(VALID_STEP1)
 
     # Assert
@@ -346,22 +345,9 @@ async def test_step1_invalid_auth(flow: TfiLiveConfigFlow) -> None:
 
 
 async def test_step1_cannot_connect(flow: TfiLiveConfigFlow) -> None:
-    """Issue #27: step 1 probe raising ClientError re-shows form with cannot_connect."""
-
+    """Issue #27: step 1 probe fetch failure re-shows form with cannot_connect."""
     # Arrange — simulate a connection error from the probe
-    @asynccontextmanager
-    async def _raising_get(*args: object, **kwargs: object):  # type: ignore[no-untyped-def]
-        """Async context manager that raises aiohttp.ClientError."""
-        raise aiohttp.ClientError("connection refused")
-        yield  # make it a generator
-
-    mock_session = MagicMock()
-    mock_session.get = _raising_get
-
-    with patch(
-        "custom_components.ha_tfi_live.config_flow.async_get_clientsession",
-        return_value=mock_session,
-    ):
+    with _patch_probe_client(side_effect=GtfsRtFetchError("connection refused")):
         result = await flow.async_step_user(VALID_STEP1)
 
     # Assert
@@ -370,16 +356,31 @@ async def test_step1_cannot_connect(flow: TfiLiveConfigFlow) -> None:
 
 
 async def test_step1_http_500_returns_cannot_connect(flow: TfiLiveConfigFlow) -> None:
-    """Issue #27: step 1 probe returning 5xx re-shows form with cannot_connect."""
-    mock_session = _make_mock_session(status=500)
-    with patch(
-        "custom_components.ha_tfi_live.config_flow.async_get_clientsession",
-        return_value=mock_session,
-    ):
+    """Issue #27: step 1 probe HTTP 5xx re-shows form with cannot_connect."""
+    with _patch_probe_client(side_effect=GtfsRtFetchError("HTTP 500")):
         result = await flow.async_step_user(VALID_STEP1)
 
     assert result["type"] == FlowResultType.FORM
     assert result["errors"].get("base") == "cannot_connect"
+
+
+async def test_step1_unparseable_feed_returns_cannot_parse(
+    flow: TfiLiveConfigFlow,
+) -> None:
+    """Issue #99: a feed the client cannot parse fails the wizard with cannot_parse.
+
+    The v0.2.4 probe only checked the HTTP status code, so a URL carrying
+    ``format=json`` (HTTP 200, JSON body) passed validation and then put the
+    entry into a permanent setup-retry loop. The probe now parses the feed
+    via GtfsRtClient, so a GtfsRtParseError must surface as a form error.
+    """
+    with _patch_probe_client(
+        side_effect=GtfsRtParseError("Invalid protobuf FeedMessage")
+    ):
+        result = await flow.async_step_user(VALID_STEP1)
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["errors"].get("base") == "cannot_parse"
 
 
 # ---------------------------------------------------------------------------
@@ -747,6 +748,21 @@ async def test_reauth_confirm_no_input_shows_form(flow: TfiLiveConfigFlow) -> No
 
 
 # ---------------------------------------------------------------------------
+# Issue #99 — default trip update URL must be the protobuf endpoint
+# ---------------------------------------------------------------------------
+
+
+def test_default_trip_update_url_has_no_format_param() -> None:
+    """Issue #99: the default trip URL must not request the JSON rendering.
+
+    The NTA endpoint returns protobuf by default; a ``format=json`` query
+    parameter yields JSON, which nta_gtfs.GtfsRtClient cannot parse.
+    """
+    assert "format=json" not in DEFAULT_TRIP_UPDATE_URL
+    assert "?" not in DEFAULT_TRIP_UPDATE_URL
+
+
+# ---------------------------------------------------------------------------
 # Step 1 — initial render (no user_input)
 # ---------------------------------------------------------------------------
 
@@ -975,11 +991,7 @@ async def test_reconfigure_happy_path(mock_hass: MagicMock) -> None:
         CONF_TRIP_UPDATE_URL: "https://new.example.com",
         CONF_STATIC_GTFS_URL: "https://newgtfs.example.com",
     }
-    mock_session = _make_mock_session(status=200)
-    with patch(
-        "custom_components.ha_tfi_live.config_flow.async_get_clientsession",
-        return_value=mock_session,
-    ):
+    with _patch_probe_client():
         result = await flow.async_step_reconfigure(new_input)
 
     assert result["type"] == FlowResultType.ABORT
@@ -1001,11 +1013,7 @@ async def test_reconfigure_invalid_auth(mock_hass: MagicMock) -> None:
         CONF_TRIP_UPDATE_URL: "https://new.example.com",
         CONF_STATIC_GTFS_URL: "https://newgtfs.example.com",
     }
-    mock_session = _make_mock_session(status=401)
-    with patch(
-        "custom_components.ha_tfi_live.config_flow.async_get_clientsession",
-        return_value=mock_session,
-    ):
+    with _patch_probe_client(side_effect=GtfsRtAuthError("HTTP 401")):
         result = await flow.async_step_reconfigure(new_input)
 
     assert result["type"] == FlowResultType.FORM

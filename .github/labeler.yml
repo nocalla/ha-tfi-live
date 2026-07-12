@@ -1,0 +1,46 @@
+# Path-based PR auto-labelling — used by .github/workflows/labeler.yml
+# (actions/labeler). Area labels mirror the integration's module layout.
+
+"area: config-flow":
+  - changed-files:
+      - any-glob-to-any-file:
+          - custom_components/ha_tfi_live/config_flow.py
+          - custom_components/ha_tfi_live/strings.json
+          - custom_components/ha_tfi_live/translations/**
+
+"area: coordinator":
+  - changed-files:
+      - any-glob-to-any-file:
+          - custom_components/ha_tfi_live/coordinator.py
+          - custom_components/ha_tfi_live/__init__.py
+          - custom_components/ha_tfi_live/diagnostics.py
+
+"area: sensor":
+  - changed-files:
+      - any-glob-to-any-file:
+          - custom_components/ha_tfi_live/sensor.py
+          - custom_components/ha_tfi_live/icons.json
+
+"area: tests":
+  - changed-files:
+      - any-glob-to-any-file:
+          - tests/**
+
+"area: ci":
+  - changed-files:
+      - any-glob-to-any-file:
+          - .github/**
+
+"area: docs":
+  - changed-files:
+      - any-glob-to-any-file:
+          - README.md
+          - CONTRIBUTING.md
+          - docs/**
+
+"area: dependencies":
+  - changed-files:
+      - any-glob-to-any-file:
+          - pyproject.toml
+          - uv.lock
+          - custom_components/ha_tfi_live/manifest.json

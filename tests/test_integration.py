@@ -50,6 +50,7 @@ from nta_gtfs import (
 )
 
 from custom_components.ha_tfi_live.__init__ import (
+    async_migrate_entry,
     async_setup_entry,
     async_unload_entry,
 )
@@ -321,6 +322,111 @@ async def test_setup_entry_gtfs_rt_auth_error_raises_config_entry_auth_failed() 
             coro.close()
 
     entry.async_start_reauth.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Issue #99: config entry migration strips format=json from the trip URL
+# ---------------------------------------------------------------------------
+
+
+def _make_migration_entry(
+    *, trip_update_url: str, version: int = 1, minor_version: int = 1
+) -> MagicMock:
+    """Return a MagicMock ConfigEntry for async_migrate_entry tests.
+
+    Args:
+        trip_update_url: The stored trip update feed URL.
+        version: The entry's major schema version.
+        minor_version: The entry's minor schema version.
+
+    Returns:
+        MagicMock with ``version``, ``minor_version``, and a ``data`` dict
+        containing the trip update URL.
+    """
+    entry = MagicMock()
+    entry.version = version
+    entry.minor_version = minor_version
+    entry.data = {
+        CONF_API_KEY: _DUMMY_API_KEY,
+        CONF_TRIP_UPDATE_URL: trip_update_url,
+        CONF_STATIC_GTFS_URL: _DUMMY_STATIC_GTFS_URL,
+        CONF_SENSORS: [],
+    }
+    return entry
+
+
+async def test_migrate_entry_strips_format_json_from_old_default() -> None:
+    """Issue #99: a v1.1 entry with the old JSON default is rewritten to protobuf."""
+    hass = _make_hass()
+    entry = _make_migration_entry(
+        trip_update_url=(
+            "https://api.nationaltransport.ie/gtfsr/v2/TripUpdates?format=json"
+        )
+    )
+
+    result = await async_migrate_entry(hass, entry)
+
+    assert result is True
+    hass.config_entries.async_update_entry.assert_called_once()
+    call_kwargs = hass.config_entries.async_update_entry.call_args[1]
+    assert call_kwargs["minor_version"] == 2
+    assert (
+        call_kwargs["data"][CONF_TRIP_UPDATE_URL]
+        == "https://api.nationaltransport.ie/gtfsr/v2/TripUpdates"
+    )
+
+
+async def test_migrate_entry_preserves_other_query_params() -> None:
+    """Issue #99: migration removes only format=json, keeping other parameters."""
+    hass = _make_hass()
+    entry = _make_migration_entry(
+        trip_update_url="https://example.com/feed?a=1&format=json&b=2"
+    )
+
+    result = await async_migrate_entry(hass, entry)
+
+    assert result is True
+    call_kwargs = hass.config_entries.async_update_entry.call_args[1]
+    assert call_kwargs["data"][CONF_TRIP_UPDATE_URL] == (
+        "https://example.com/feed?a=1&b=2"
+    )
+
+
+async def test_migrate_entry_clean_url_bumps_minor_version_only() -> None:
+    """Issue #99: a v1.1 entry with a clean URL is bumped to 1.2 unchanged."""
+    hass = _make_hass()
+    entry = _make_migration_entry(trip_update_url=_DUMMY_TRIP_UPDATE_URL)
+
+    result = await async_migrate_entry(hass, entry)
+
+    assert result is True
+    call_kwargs = hass.config_entries.async_update_entry.call_args[1]
+    assert call_kwargs["minor_version"] == 2
+    assert call_kwargs["data"][CONF_TRIP_UPDATE_URL] == _DUMMY_TRIP_UPDATE_URL
+
+
+async def test_migrate_entry_current_version_is_noop() -> None:
+    """A v1.2 entry needs no migration and the entry data is untouched."""
+    hass = _make_hass()
+    entry = _make_migration_entry(
+        trip_update_url=_DUMMY_TRIP_UPDATE_URL, minor_version=2
+    )
+
+    result = await async_migrate_entry(hass, entry)
+
+    assert result is True
+    hass.config_entries.async_update_entry.assert_not_called()
+
+
+async def test_migrate_entry_future_version_returns_false() -> None:
+    """An entry created by a newer major version cannot be migrated."""
+    hass = _make_hass()
+    entry = _make_migration_entry(trip_update_url=_DUMMY_TRIP_UPDATE_URL, version=2)
+
+    result = await async_migrate_entry(hass, entry)
+
+    assert result is False
+    hass.config_entries.async_update_entry.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

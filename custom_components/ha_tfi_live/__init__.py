@@ -1,6 +1,7 @@
 """TFI Live Home Assistant integration."""
 
 import logging
+import urllib.parse
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
@@ -19,6 +20,63 @@ from .coordinator import TfiLiveCoordinator
 _logger = logging.getLogger(__name__)
 
 type TfiLiveConfigEntry = ConfigEntry[TfiLiveCoordinator]
+
+
+def _strip_format_json(url: str) -> str:
+    """Remove any ``format=json`` query parameter from a feed URL.
+
+    The NTA GTFS-R endpoint returns JSON when the URL carries
+    ``format=json``, but ``nta_gtfs.GtfsRtClient`` can only parse the
+    protobuf default (#99). All other query parameters are preserved.
+
+    Args:
+        url: The trip update feed URL to normalise.
+
+    Returns:
+        The URL with any ``format=json`` parameter removed.
+    """
+    parts = urllib.parse.urlsplit(url)
+    query = [
+        (key, value)
+        for key, value in urllib.parse.parse_qsl(parts.query, keep_blank_values=True)
+        if not (key == "format" and value.lower() == "json")
+    ]
+    return urllib.parse.urlunsplit(parts._replace(query=urllib.parse.urlencode(query)))
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Migrate a config entry to the current schema version.
+
+    Version 1.2 strips ``format=json`` from the stored trip update URL so
+    entries created with the pre-#99 default recover without being re-added.
+
+    Args:
+        hass: The Home Assistant instance.
+        entry: The config entry to migrate.
+
+    Returns:
+        True when migration succeeds, False when the entry was created by a
+        newer version of the integration and cannot be migrated.
+    """
+    if entry.version > 1:
+        return False
+
+    if entry.minor_version < 2:
+        trip_update_url: str = entry.data.get(CONF_TRIP_UPDATE_URL, "")
+        migrated = _strip_format_json(trip_update_url)
+        if migrated != trip_update_url:
+            _logger.info(
+                "Migrating trip update URL from %s to %s",
+                trip_update_url,
+                migrated,
+            )
+        hass.config_entries.async_update_entry(
+            entry,
+            data={**entry.data, CONF_TRIP_UPDATE_URL: migrated},
+            minor_version=2,
+        )
+
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: TfiLiveConfigEntry) -> bool:
