@@ -118,9 +118,17 @@ automation:
 
 ## Data Updates
 
-- **Real-time feed:** polled every 60 seconds from the NTA GTFS-RT endpoint.
+- **Real-time feed:** polled every 60 seconds from the NTA GTFS-RT endpoint — the maximum rate permitted by the NTA fair usage policy (see below).
 - **Static schedule:** downloaded at startup and refreshed every 24 hours. Route names and scheduled times are sourced from this data.
 - **Availability:** a sensor goes unavailable if no successful feed fetch has occurred within the past 3 minutes. It recovers automatically when the feed becomes reachable again.
+
+## Data Licence, Attribution and Fair Usage
+
+The GTFS data shown by this integration is provided by the [National Transport Authority (NTA)](https://www.nationaltransport.ie/) under the [Creative Commons Attribution 4.0 International](https://creativecommons.org/licenses/by/4.0/) licence, subject to the [NTA GTFS fair usage policy](https://developer.nationaltransport.ie/usagepolicy). This integration's MIT licence covers the code only, not the data. The data is provided "as is" and the NTA is not responsible for any errors or inaccuracies in it.
+
+If you display this integration's data in a public-facing application, presentation, or publication, the policy requires you to credit the NTA as the data provider, link to the GTFS data source or the [NTA website](https://www.nationaltransport.ie/), and include the "as is" statement above.
+
+The policy limits each API token to **one GTFS-RT request every 60 seconds**. The integration polls exactly once per 60 seconds, so a single Home Assistant instance stays within the limit — but if the same API token is shared with other applications (or a second HA instance), the combined request rate will exceed it. Use a dedicated token for this integration. The static GTFS archive is refreshed once every 24 hours, well within fair usage.
 
 ## Known Limitations
 
@@ -142,7 +150,7 @@ automation:
 # Clone and install
 git clone https://github.com/nocalla/ha-tfi-live.git
 cd ha-tfi-live
-uv sync --extra dev   # installs python-nta-gtfs from GitHub automatically
+uv sync --extra dev   # installs nta-gtfs from PyPI automatically
 
 # Run tests
 uv run pytest
@@ -156,4 +164,4 @@ The test suite uses `unittest.mock` throughout — no live network calls are mad
 
 ### Library dependency
 
-Real-time and static GTFS fetch/parse logic lives in a separate library: [`python-nta-gtfs`](https://github.com/nocalla/python-nta-gtfs). It is declared as a git dependency in `pyproject.toml` and installed automatically by `uv sync`. Once the library is published to PyPI the dependency will switch to a version pin and `manifest.json` will declare it as an HA requirement (tracked in [#70](https://github.com/nocalla/ha-tfi-live/issues/70)).
+Real-time and static GTFS fetch/parse logic lives in a separate library: [`nta-gtfs`](https://pypi.org/project/nta-gtfs/) ([source](https://github.com/nocalla/python-nta-gtfs), import name `nta_gtfs`). It is published on PyPI, declared as a versioned dependency in `pyproject.toml`, and listed as a requirement in `manifest.json` so Home Assistant installs it automatically.
