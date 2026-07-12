@@ -259,10 +259,7 @@ class TfiLiveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 }
                 self._config[CONF_SENSORS].append(sensor_config)
 
-                return self.async_show_menu(
-                    step_id="sensor_menu",
-                    menu_options=[_MENU_ADD_ANOTHER, _MENU_FINISH],
-                )
+                return await self.async_step_sensor_menu()
 
         schema = vol.Schema(
             {
@@ -278,6 +275,27 @@ class TfiLiveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="sensor",
             data_schema=schema,
             errors=errors,
+        )
+
+    async def async_step_sensor_menu(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Show the post-add menu offering to add another sensor or finish.
+
+        HA requires the ``step_id`` of a menu result to name a real step
+        method on the handler, so the menu must live in its own step
+        rather than being returned inline from :meth:`async_step_sensor`.
+
+        Args:
+            user_input: Unused; present to satisfy the HA flow handler
+                protocol.
+
+        Returns:
+            A ConfigFlowResult showing the add-another/finish menu.
+        """
+        return self.async_show_menu(
+            step_id="sensor_menu",
+            menu_options=[_MENU_ADD_ANOTHER, _MENU_FINISH],
         )
 
     async def async_step_add_another(
@@ -532,10 +550,7 @@ class TfiLiveOptionsFlowHandler(config_entries.OptionsFlow):
                 }
                 self._new_sensors.append(sensor_config)
 
-                return self.async_show_menu(
-                    step_id="sensor_menu",
-                    menu_options=[_MENU_ADD_ANOTHER, _MENU_FINISH],
-                )
+                return await self.async_step_sensor_menu()
 
         schema = vol.Schema(
             {
@@ -551,6 +566,27 @@ class TfiLiveOptionsFlowHandler(config_entries.OptionsFlow):
             step_id="sensor",
             data_schema=schema,
             errors=errors,
+        )
+
+    async def async_step_sensor_menu(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Show the post-add menu offering to add another sensor or finish.
+
+        HA requires the ``step_id`` of a menu result to name a real step
+        method on the handler, so the menu must live in its own step
+        rather than being returned inline from :meth:`async_step_sensor`.
+
+        Args:
+            user_input: Unused; present to satisfy the HA flow handler
+                protocol.
+
+        Returns:
+            A ConfigFlowResult showing the add-another/finish menu.
+        """
+        return self.async_show_menu(
+            step_id="sensor_menu",
+            menu_options=[_MENU_ADD_ANOTHER, _MENU_FINISH],
         )
 
     async def async_step_add_another(

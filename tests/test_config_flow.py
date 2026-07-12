@@ -15,7 +15,9 @@ code ever regresses on the no-network constraint.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from contextlib import asynccontextmanager
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
@@ -68,6 +70,85 @@ _PREFILLED_CONFIG = {
 }
 
 # ---------------------------------------------------------------------------
+# Stub factories
+# ---------------------------------------------------------------------------
+
+
+def _assert_step_exists(flow: object, step_id: str | None) -> None:
+    """Mirror HA's ``_raise_if_step_does_not_exist`` step validation.
+
+    Home Assistant's flow manager raises ``UnknownStep`` (surfaced to the
+    user as "Invalid flow specified", issue #78) when a FORM or MENU result
+    carries a ``step_id`` — or a menu option — with no matching
+    ``async_step_<step_id>`` method on the handler. The stubs replicate
+    that check so tests fail the same way production HA does.
+
+    Args:
+        flow: The flow handler under test.
+        step_id: The step id referenced by the flow result.
+
+    Raises:
+        AssertionError: If the handler lacks the matching step method.
+    """
+    assert step_id is not None, "flow result is missing a step_id"
+    method = f"async_step_{step_id}"
+    assert hasattr(flow, method), (
+        f"Handler {type(flow).__name__} doesn't support step {step_id} "
+        f"(missing {method}); real HA would raise UnknownStep"
+    )
+
+
+def _stub_show_form(flow: object) -> Callable[..., dict[str, Any]]:
+    """Return an ``async_show_form`` stub that validates the step exists.
+
+    Args:
+        flow: The flow handler the stub will be attached to.
+
+    Returns:
+        A callable matching the ``async_show_form`` signature that returns
+        a FORM result dict after validating the ``step_id``.
+    """
+
+    def _show_form(**kwargs: Any) -> dict[str, Any]:
+        _assert_step_exists(flow, kwargs.get("step_id"))
+        return {
+            "type": FlowResultType.FORM,
+            "step_id": kwargs.get("step_id"),
+            "errors": kwargs.get("errors", {}),
+            "data_schema": kwargs.get("data_schema"),
+        }
+
+    return _show_form
+
+
+def _stub_show_menu(flow: object) -> Callable[..., dict[str, Any]]:
+    """Return an ``async_show_menu`` stub that validates all steps exist.
+
+    Validates both the menu's own ``step_id`` and every menu option,
+    since HA routes each selected option to ``async_step_<option>``.
+
+    Args:
+        flow: The flow handler the stub will be attached to.
+
+    Returns:
+        A callable matching the ``async_show_menu`` signature that returns
+        a MENU result dict after validating step ids.
+    """
+
+    def _show_menu(**kwargs: Any) -> dict[str, Any]:
+        _assert_step_exists(flow, kwargs.get("step_id"))
+        for option in kwargs.get("menu_options", []):
+            _assert_step_exists(flow, option)
+        return {
+            "type": FlowResultType.MENU,
+            "step_id": kwargs.get("step_id"),
+            "menu_options": kwargs.get("menu_options", []),
+        }
+
+    return _show_menu
+
+
+# ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
 
@@ -97,17 +178,8 @@ def flow(mock_hass: MagicMock) -> TfiLiveConfigFlow:
     f.hass = mock_hass
     f.context = {}
 
-    f.async_show_form = lambda **kwargs: {
-        "type": FlowResultType.FORM,
-        "step_id": kwargs.get("step_id"),
-        "errors": kwargs.get("errors", {}),
-        "data_schema": kwargs.get("data_schema"),
-    }
-    f.async_show_menu = lambda **kwargs: {
-        "type": FlowResultType.MENU,
-        "step_id": kwargs.get("step_id"),
-        "menu_options": kwargs.get("menu_options", []),
-    }
+    f.async_show_form = _stub_show_form(f)
+    f.async_show_menu = _stub_show_menu(f)
     f.async_create_entry = lambda title, data: {
         "type": FlowResultType.CREATE_ENTRY,
         "title": title,
@@ -466,6 +538,42 @@ async def test_step2_repeated_addition_sensor_names_preserved(
     # Assert
     names = [s["name"] for s in flow._config[CONF_SENSORS]]
     assert names == ["Alpha", "Beta"]
+
+
+# ---------------------------------------------------------------------------
+# Issue #78 — sensor_menu must be a real step on the handler
+# ---------------------------------------------------------------------------
+
+
+async def test_step2_success_menu_step_is_real(flow: TfiLiveConfigFlow) -> None:
+    """Issue #78: valid sensor submission shows a menu backed by a real step.
+
+    The v0.2.3 regression returned a menu with step_id='sensor_menu' but no
+    async_step_sensor_menu method, so HA raised UnknownStep and the frontend
+    showed "Invalid flow specified". The validating async_show_menu stub
+    fails this test if the step method is ever removed again.
+    """
+    # Arrange
+    flow._config = dict(_PREFILLED_CONFIG, **{CONF_SENSORS: []})
+
+    # Act
+    result = await flow.async_step_sensor(dict(VALID_STEP2))
+
+    # Assert
+    assert result["type"] == FlowResultType.MENU
+    assert result["step_id"] == "sensor_menu"
+    assert result["menu_options"] == ["add_another", "finish"]
+
+
+async def test_sensor_menu_step_renders_menu(flow: TfiLiveConfigFlow) -> None:
+    """Issue #78: async_step_sensor_menu itself renders the post-add menu."""
+    # Act
+    result = await flow.async_step_sensor_menu()
+
+    # Assert
+    assert result["type"] == FlowResultType.MENU
+    assert result["step_id"] == "sensor_menu"
+    assert result["menu_options"] == ["add_another", "finish"]
 
 
 async def test_step2_add_another_loops_back_to_sensor_form(
@@ -846,12 +954,7 @@ def _make_flow_with_reconfigure_entry(
     f.hass = mock_hass
     f.context = {"entry_id": "reconfigure_entry", "source": "reconfigure"}
 
-    f.async_show_form = lambda **kwargs: {
-        "type": FlowResultType.FORM,
-        "step_id": kwargs.get("step_id"),
-        "errors": kwargs.get("errors", {}),
-        "data_schema": kwargs.get("data_schema"),
-    }
+    f.async_show_form = _stub_show_form(f)
     f.async_update_reload_and_abort = lambda entry, data, reason: {
         "type": FlowResultType.ABORT,
         "reason": reason,
@@ -966,17 +1069,8 @@ def options_flow(mock_hass: MagicMock) -> TfiLiveOptionsFlowHandler:
     # handler is the "entry_id" used by the property
     handler.handler = mock_entry.entry_id  # type: ignore[assignment]
 
-    handler.async_show_form = lambda **kwargs: {  # type: ignore[method-assign]
-        "type": FlowResultType.FORM,
-        "step_id": kwargs.get("step_id"),
-        "errors": kwargs.get("errors", {}),
-        "data_schema": kwargs.get("data_schema"),
-    }
-    handler.async_show_menu = lambda **kwargs: {  # type: ignore[method-assign]
-        "type": FlowResultType.MENU,
-        "step_id": kwargs.get("step_id"),
-        "menu_options": kwargs.get("menu_options", []),
-    }
+    handler.async_show_form = _stub_show_form(handler)  # type: ignore[method-assign]
+    handler.async_show_menu = _stub_show_menu(handler)  # type: ignore[method-assign]
     handler.async_create_entry = lambda title, data: {  # type: ignore[method-assign]
         "type": FlowResultType.CREATE_ENTRY,
         "title": title,
@@ -1053,6 +1147,28 @@ async def test_options_flow_add_another_loops(
 
     assert result["type"] == FlowResultType.FORM
     assert result["step_id"] == "sensor"
+
+
+async def test_options_flow_success_menu_step_is_real(
+    options_flow: TfiLiveOptionsFlowHandler,
+) -> None:
+    """Issue #78: options flow sensor success shows a menu backed by a real step."""
+    result = await options_flow.async_step_sensor(dict(VALID_STEP2))
+
+    assert result["type"] == FlowResultType.MENU
+    assert result["step_id"] == "sensor_menu"
+    assert result["menu_options"] == ["add_another", "finish"]
+
+
+async def test_options_flow_sensor_menu_step_renders_menu(
+    options_flow: TfiLiveOptionsFlowHandler,
+) -> None:
+    """Issue #78: options flow async_step_sensor_menu renders the post-add menu."""
+    result = await options_flow.async_step_sensor_menu()
+
+    assert result["type"] == FlowResultType.MENU
+    assert result["step_id"] == "sensor_menu"
+    assert result["menu_options"] == ["add_another", "finish"]
 
 
 async def test_options_flow_direction_id_invalid(
