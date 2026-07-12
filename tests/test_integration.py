@@ -30,6 +30,9 @@ TC-3  StaticGtfsLoadError in the background load logs a WARNING and is
 TC-4  GtfsRtAuthError during first refresh propagates
       ConfigEntryAuthFailed and triggers async_start_reauth.
 TC-5  Unload: after a successful setup, async_unload_entry returns True.
+
+Issue #100: setup passes the configured sensors' stop IDs (deduplicated) to
+StaticGtfsClient as ``stop_ids`` so the static parse only indexes those stops.
 """
 
 import logging
@@ -231,6 +234,59 @@ async def test_setup_entry_happy_path_stores_coordinator_and_forwards_sensor() -
     hass.config_entries.async_forward_entry_setups.assert_called_once_with(
         entry, [Platform.SENSOR]
     )
+
+
+# ---------------------------------------------------------------------------
+# Issue #100: configured stop IDs are passed to the static GTFS client
+# ---------------------------------------------------------------------------
+
+
+async def test_setup_entry_passes_configured_stop_ids_to_static_client() -> None:
+    """Issue #100: setup passes the configured stop IDs to StaticGtfsClient.
+
+    Restricting the static GTFS parse to the configured stops is what keeps
+    peak memory low on nationwide feeds, so the integration must forward
+    every configured sensor's stop ID — deduplicated — as ``stop_ids``.
+
+    Arrange: entry with three sensors across two distinct stops;
+        StaticGtfsClient replaced by a MagicMock class in the integration
+        module namespace to capture constructor kwargs.
+    Act: call async_setup_entry.
+    Assert:
+        - setup returns True
+        - StaticGtfsClient was constructed with stop_ids == the set of
+          distinct configured stop IDs
+    """
+    hass = _make_hass()
+    entry = _make_entry(
+        sensors=[
+            {"stop_id": "STOP_A", "route_id": "46A", "name": "Sensor A"},
+            {"stop_id": "STOP_B", "route_id": "145", "name": "Sensor B"},
+            {"stop_id": "STOP_A", "route_id": "155", "name": "Sensor A2"},
+        ]
+    )
+
+    static_client_cls = MagicMock()
+    static_client_cls.return_value = MagicMock(loaded_at=None)
+
+    token = current_entry.set(entry)
+    try:
+        with (
+            _base_patches(),
+            patch(
+                "custom_components.ha_tfi_live.__init__.StaticGtfsClient",
+                static_client_cls,
+            ),
+        ):
+            result = await async_setup_entry(hass, entry)
+    finally:
+        current_entry.reset(token)
+        for coro in entry.background_coros:
+            coro.close()
+
+    assert result is True
+    static_client_cls.assert_called_once()
+    assert static_client_cls.call_args.kwargs["stop_ids"] == {"STOP_A", "STOP_B"}
 
 
 # ---------------------------------------------------------------------------

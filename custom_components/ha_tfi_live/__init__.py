@@ -11,7 +11,9 @@ from nta_gtfs import GtfsRtClient, StaticGtfsClient
 
 from .const import (
     CONF_API_KEY,
+    CONF_SENSORS,
     CONF_STATIC_GTFS_URL,
+    CONF_STOP_ID,
     CONF_TRIP_UPDATE_URL,
     STATIC_GTFS_REFRESH_HOURS,
 )
@@ -104,10 +106,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: TfiLiveConfigEntry) -> b
     """
     session = async_get_clientsession(hass)
 
+    # Restrict the static GTFS parse to the configured stops — indexing the
+    # full nationwide feed is what OOM-killed low-memory hosts (#100).
+    stop_ids = {sensor[CONF_STOP_ID] for sensor in entry.data.get(CONF_SENSORS, [])}
+
     cache = StaticGtfsClient(
         static_gtfs_url=entry.data[CONF_STATIC_GTFS_URL],
         session=session,
         refresh_hours=STATIC_GTFS_REFRESH_HOURS,
+        stop_ids=stop_ids,
     )
 
     rt_client = GtfsRtClient(
