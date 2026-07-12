@@ -1,7 +1,7 @@
 """Tests for TfiLiveSensor — state, attributes, and availability.
 
 Covers acceptance criteria AC 1, 2, 3, 4, 5, 6, 7, 7a, 8, 9, 11, 12, 13,
-24, and 25 from specs/001-core-sensor/spec.md, plus unique-ID stability and
+24, and 25 from .claude/specs/001-core-sensor/spec.md, plus unique-ID stability and
 distinctness requirements from the spec's constraint section.
 
 Each test is self-contained.  The coordinator and static cache are replaced

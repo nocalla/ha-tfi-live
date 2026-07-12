@@ -9,3 +9,5 @@ dist/
 .coverage
 htmlcov/
 .vscode/
+# Claude Code workspace (specs, memory, local settings)
+.claude/
