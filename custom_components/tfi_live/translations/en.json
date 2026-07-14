@@ -81,5 +81,11 @@
       "required": "This field is required.",
       "invalid_direction": "Direction must be 0 or 1."
     }
+  },
+  "issues": {
+    "unmatched_stop_route_pair": {
+      "title": "Sensor stop/route pair not found in the schedule",
+      "description": "Stop ID `{stop_id}` and route ID `{route_id}` never appear together in the static GTFS schedule, so the following sensor(s) will never report a departure: {sensor_names}. This usually means a stop_code or route_short_name (the numbers shown on the bus stop sign or in the TFI Live app) was entered instead of the real GTFS stop_id/route_id. Edit the affected sensor(s) to correct the value."
+    }
   }
 }

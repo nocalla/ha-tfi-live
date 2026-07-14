@@ -8,6 +8,7 @@ from typing import Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import CoreState, HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from nta_gtfs import (
     GtfsRtAuthError,
@@ -18,7 +19,14 @@ from nta_gtfs import (
     StaticGtfsLoadError,
 )
 
-from .const import DOMAIN, STATIC_GTFS_REFRESH_HOURS, UPDATE_INTERVAL_SECONDS
+from .const import (
+    CONF_ROUTE_ID,
+    CONF_SENSORS,
+    CONF_STOP_ID,
+    DOMAIN,
+    STATIC_GTFS_REFRESH_HOURS,
+    UPDATE_INTERVAL_SECONDS,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -191,6 +199,74 @@ class TfiLiveCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
         else:
             _logger.info("Static GTFS data loaded")
+            self._async_check_unmatched_pairs()
+
+    def _async_check_unmatched_pairs(self) -> None:
+        """Raise or clear Repairs issues for stop/route pairs absent from the schedule.
+
+        Groups configured sensors by unique ``(stop_id, route_id)`` pair and
+        checks each against ``cache.has_scheduled_pair``, which ignores
+        calendar/direction/operator filtering entirely. A pair that never
+        appears in the static schedule at all is a misconfiguration (e.g. a
+        stop_code or route_short_name entered where a real stop_id/route_id
+        is required, #102) rather than "no departures right now", so it
+        raises a warning-level Repairs issue naming every affected sensor.
+        Pairs found present have any previously-raised issue for them
+        cleared, since a later config fix or a route only appearing in a
+        later feed should make the issue disappear automatically. A pair
+        that no longer appears in the config at all — because the sensor
+        was edited to a different stop/route or removed outright — is
+        reconciled separately by comparing against the issue registry
+        directly, since it never reaches the per-pair loop below. Does
+        nothing until the cache has completed its first successful load, to
+        avoid flagging every configured pair as unmatched before there is
+        any schedule data to check against.
+        """
+        if not self._cache.available:
+            return
+
+        pairs: dict[tuple[str, str], list[str]] = {}
+        for sensor_config in self._config_entry.data.get(CONF_SENSORS, []):
+            stop_id: str = sensor_config[CONF_STOP_ID]
+            route_id: str = sensor_config[CONF_ROUTE_ID]
+            pairs.setdefault((stop_id, route_id), []).append(sensor_config["name"])
+
+        entry_id = self._config_entry.entry_id
+        current_unmatched_ids: set[str] = set()
+
+        for (stop_id, route_id), sensor_names in pairs.items():
+            issue_id = f"{entry_id}_{stop_id}_{route_id}"
+            if self._cache.has_scheduled_pair(stop_id, route_id):
+                ir.async_delete_issue(self.hass, DOMAIN, issue_id)
+            else:
+                current_unmatched_ids.add(issue_id)
+                ir.async_create_issue(
+                    self.hass,
+                    DOMAIN,
+                    issue_id,
+                    is_fixable=False,
+                    severity=ir.IssueSeverity.WARNING,
+                    translation_key="unmatched_stop_route_pair",
+                    translation_placeholders={
+                        "stop_id": stop_id,
+                        "route_id": route_id,
+                        "sensor_names": ", ".join(sensor_names),
+                    },
+                )
+
+        # Clear issues previously raised by this entry for pairs that have
+        # since dropped out of the config entirely (edited or removed) —
+        # querying the registry directly rather than tracking state across
+        # coordinator instances means this self-heals across entry reloads.
+        stale_prefix = f"{entry_id}_"
+        registry_issues = ir.async_get(self.hass).issues
+        for domain, issue_id in list(registry_issues):
+            if (
+                domain == DOMAIN
+                and issue_id.startswith(stale_prefix)
+                and issue_id not in current_unmatched_ids
+            ):
+                ir.async_delete_issue(self.hass, DOMAIN, issue_id)
 
     @property
     def last_successful_fetch(self) -> datetime | None:

@@ -476,3 +476,183 @@ async def test_refresh_static_failure_logs_warning_and_swallows(
 
     warnings = [r for r in caplog.records if r.levelname == "WARNING"]
     assert len(warnings) >= 1
+
+
+# ---------------------------------------------------------------------------
+# Repairs issues for unmatched (stop_id, route_id) pairs (#102/#108)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def mock_ir():
+    """Patch the issue_registry helpers imported into the coordinator module.
+
+    ``async_get(hass).issues`` defaults to an empty dict, standing in for a
+    registry with no pre-existing issues; tests covering stale-issue
+    reconciliation override it.
+    """
+    with (
+        patch("custom_components.tfi_live.coordinator.ir.async_create_issue") as create,
+        patch("custom_components.tfi_live.coordinator.ir.async_delete_issue") as delete,
+        patch("custom_components.tfi_live.coordinator.ir.async_get") as get_registry,
+    ):
+        get_registry.return_value.issues = {}
+        yield create, delete, get_registry
+
+
+async def test_unmatched_pair_creates_repairs_issue(
+    coordinator, mock_entry, mock_cache, mock_ir
+):
+    """A pair absent from the static index raises a WARNING Repairs issue."""
+    create, delete, _ = mock_ir
+    mock_cache.available = True
+    mock_cache.has_scheduled_pair = MagicMock(return_value=False)
+    mock_entry.data["sensors"] = [
+        {"name": "Farranlea Pk 220", "stop_id": "8370B2418801", "route_id": "220"}
+    ]
+
+    await coordinator._async_refresh_static()
+
+    create.assert_called_once()
+    delete.assert_not_called()
+    _, kwargs = create.call_args
+    assert kwargs["is_fixable"] is False
+    assert kwargs["translation_key"] == "unmatched_stop_route_pair"
+    assert kwargs["translation_placeholders"]["stop_id"] == "8370B2418801"
+    assert kwargs["translation_placeholders"]["route_id"] == "220"
+    assert "Farranlea Pk 220" in kwargs["translation_placeholders"]["sensor_names"]
+    args, _ = create.call_args
+    assert args[2] == f"{mock_entry.entry_id}_8370B2418801_220"
+
+
+async def test_matched_pair_clears_repairs_issue(
+    coordinator, mock_entry, mock_cache, mock_ir
+):
+    """A pair present in the static index clears any existing Repairs issue."""
+    create, delete, _ = mock_ir
+    mock_cache.available = True
+    mock_cache.has_scheduled_pair = MagicMock(return_value=True)
+    mock_entry.data["sensors"] = [
+        {"name": "Farranlea Pk 220", "stop_id": "8370B2418801", "route_id": "2 220 c b"}
+    ]
+
+    await coordinator._async_refresh_static()
+
+    delete.assert_called_once_with(
+        coordinator.hass, "tfi_live", f"{mock_entry.entry_id}_8370B2418801_2 220 c b"
+    )
+    create.assert_not_called()
+
+
+async def test_no_repairs_check_before_cache_available(
+    coordinator, mock_entry, mock_cache, mock_ir
+):
+    """No issue is created or deleted before the cache has loaded once."""
+    create, delete, _ = mock_ir
+    mock_cache.available = False
+    mock_entry.data["sensors"] = [
+        {"name": "Farranlea Pk 220", "stop_id": "8370B2418801", "route_id": "220"}
+    ]
+
+    await coordinator._async_refresh_static()
+
+    create.assert_not_called()
+    delete.assert_not_called()
+
+
+async def test_shared_pair_produces_one_issue_naming_both_sensors(
+    coordinator, mock_entry, mock_cache, mock_ir
+):
+    """Two sensors sharing a (stop_id, route_id) pair raise exactly one issue."""
+    create, delete, _ = mock_ir
+    mock_cache.available = True
+    mock_cache.has_scheduled_pair = MagicMock(return_value=False)
+    mock_entry.data["sensors"] = [
+        {
+            "name": "Inbound",
+            "stop_id": "8370B2418801",
+            "route_id": "220",
+            "direction_id": 0,
+        },
+        {
+            "name": "Outbound",
+            "stop_id": "8370B2418801",
+            "route_id": "220",
+            "direction_id": 1,
+        },
+    ]
+
+    await coordinator._async_refresh_static()
+
+    create.assert_called_once()
+    _, kwargs = create.call_args
+    sensor_names = kwargs["translation_placeholders"]["sensor_names"]
+    assert "Inbound" in sensor_names
+    assert "Outbound" in sensor_names
+
+
+async def test_no_repairs_check_on_static_refresh_failure(
+    coordinator, mock_entry, mock_cache, mock_ir
+):
+    """A failed static refresh never evaluates Repairs issues."""
+    create, delete, _ = mock_ir
+    mock_cache.async_refresh_if_stale = AsyncMock(
+        side_effect=StaticGtfsLoadError("HTTP 500")
+    )
+    mock_cache.available = True
+    mock_entry.data["sensors"] = [
+        {"name": "Farranlea Pk 220", "stop_id": "8370B2418801", "route_id": "220"}
+    ]
+
+    await coordinator._async_refresh_static()
+
+    create.assert_not_called()
+    delete.assert_not_called()
+
+
+async def test_stale_issue_cleared_when_sensor_pair_no_longer_configured(
+    coordinator, mock_entry, mock_cache, mock_ir
+):
+    """An issue for a pair edited/removed from config is cleared even though
+    it never re-enters the per-pair loop.
+
+    Simulates a previously-raised issue (e.g. from a since-edited or
+    since-deleted sensor) still sitting in the issue registry, with no
+    sensor in the current config referencing that pair any more.
+    """
+    create, delete, get_registry = mock_ir
+    mock_cache.available = True
+    mock_cache.has_scheduled_pair = MagicMock(return_value=True)
+    mock_entry.data["sensors"] = [
+        {"name": "Current Sensor", "stop_id": "STOP_NEW", "route_id": "ROUTE_NEW"}
+    ]
+    stale_issue_id = f"{mock_entry.entry_id}_STOP_OLD_ROUTE_OLD"
+    get_registry.return_value.issues = {
+        ("tfi_live", stale_issue_id): MagicMock(),
+        ("other_domain", "unrelated_issue"): MagicMock(),
+    }
+
+    await coordinator._async_refresh_static()
+
+    delete.assert_any_call(coordinator.hass, "tfi_live", stale_issue_id)
+    assert delete.call_count == 2  # the matched current pair, plus the stale one
+
+
+async def test_current_unmatched_pair_not_cleared_as_stale(
+    coordinator, mock_entry, mock_cache, mock_ir
+):
+    """A pair that is both currently unmatched and already in the registry
+    keeps its issue — the stale-cleanup pass must not delete it."""
+    create, delete, get_registry = mock_ir
+    mock_cache.available = True
+    mock_cache.has_scheduled_pair = MagicMock(return_value=False)
+    mock_entry.data["sensors"] = [
+        {"name": "Farranlea Pk 220", "stop_id": "8370B2418801", "route_id": "220"}
+    ]
+    issue_id = f"{mock_entry.entry_id}_8370B2418801_220"
+    get_registry.return_value.issues = {("tfi_live", issue_id): MagicMock()}
+
+    await coordinator._async_refresh_static()
+
+    create.assert_called_once()
+    delete.assert_not_called()
