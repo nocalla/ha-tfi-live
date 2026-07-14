@@ -130,6 +130,8 @@ If you display this integration's data in a public-facing application, presentat
 
 The policy limits each API token to **one GTFS-RT request every 60 seconds**. The integration polls exactly once per 60 seconds, so a single Home Assistant instance stays within the limit — but if the same API token is shared with other applications (or a second HA instance), the combined request rate will exceed it. Use a dedicated token for this integration. The static GTFS archive is refreshed once every 24 hours, well within fair usage.
 
+"TFI Live" is an independent, community-built integration and is not affiliated with, endorsed by, or officially connected to the National Transport Authority (NTA) or Transport for Ireland (TFI). "TFI" and "Transport for Ireland" are brands of the NTA, used here only to describe the data source this integration connects to.
+
 ## Known Limitations
 
 - **Operator ID filter:** applies to the static schedule only. The GTFS-RT feed does not include agency information in trip updates, so the operator filter cannot be applied to real-time data.
