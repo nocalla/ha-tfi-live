@@ -2861,7 +2861,7 @@ requires-dist = [
     { name = "aioresponses", marker = "extra == 'dev'", specifier = ">=0.7.6" },
     { name = "bandit", marker = "extra == 'dev'", specifier = ">=1.7.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=2.1.0" },
-    { name = "nta-gtfs", specifier = ">=0.2.0" },
+    { name = "nta-gtfs", specifier = ">=0.2.1" },
     { name = "pydocstyle", marker = "extra == 'dev'", specifier = ">=6.3.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23.0" },
@@ -4119,7 +4119,7 @@ wheels = [
 
 [[package]]
 name = "nta-gtfs"
-version = "0.2.0"
+version = "0.2.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp", version = "3.11.11", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.13'" },
@@ -4128,9 +4128,9 @@ dependencies = [
     { name = "aiohttp", version = "3.13.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.14.2'" },
     { name = "gtfs-realtime-bindings" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/b8/d5/282f374c7e012cb81a264f210859ea873877b40e6a4ae4a6ca8fef2084ca/nta_gtfs-0.2.0.tar.gz", hash = "sha256:17fa4a2690dda18edb077b31424bcf2cabac0e69f5c0f60946d33ca6935a2e20", size = 25362, upload-time = "2026-07-12T20:11:06.747Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/9a/46/1cdaedeaa64b530e55e5038c51f1e08aacd42d5e8df11b2f4dceb0f80794/nta_gtfs-0.2.1.tar.gz", hash = "sha256:f0cec0977e9c2d4dca62d8e653cd47b8e7d170eaa6290d5666bae45cdf2ad3af", size = 26335, upload-time = "2026-07-14T20:02:42.84Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/04/73/48f53986bc46318205938e79adedd4f642466b60c82dba8b0daaf17f9ef3/nta_gtfs-0.2.0-py3-none-any.whl", hash = "sha256:33989171ec92d82823da4e3eb2e5e6748fcb7fdea445169d78a5d6cc1bda45ca", size = 14588, upload-time = "2026-07-12T20:11:05.491Z" },
+    { url = "https://files.pythonhosted.org/packages/b8/28/27313f3873ec20b9c87ea3666c9b3b4a3029eb984a06a1967e06b6eb3a91/nta_gtfs-0.2.1-py3-none-any.whl", hash = "sha256:ddc9a3c0be4ffb23437271768a85b14f46e9381c1df46b16e6e9f8bdf45a9a0d", size = 14717, upload-time = "2026-07-14T20:02:41.627Z" },
 ]
 
 [[package]]
