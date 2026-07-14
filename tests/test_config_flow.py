@@ -1,4 +1,4 @@
-"""Tests for custom_components.ha_tfi_live.config_flow.
+"""Tests for custom_components.tfi_live.config_flow.
 
 Covers re-auth preserving config, step 1 required field and URL validation,
 step 2 required field and direction_id validation, and repeated sensor
@@ -24,11 +24,11 @@ import pytest
 from homeassistant.data_entry_flow import AbortFlow, FlowResultType
 from nta_gtfs import GtfsRtAuthError, GtfsRtFetchError, GtfsRtParseError
 
-from custom_components.ha_tfi_live.config_flow import (
+from custom_components.tfi_live.config_flow import (
     TfiLiveConfigFlow,
     TfiLiveOptionsFlowHandler,
 )
-from custom_components.ha_tfi_live.const import (
+from custom_components.tfi_live.const import (
     CONF_API_KEY,
     CONF_DIRECTION_ID,
     CONF_ROUTE_ID,
@@ -285,11 +285,11 @@ def _patch_probe_client(side_effect: Exception | None = None):  # type: ignore[n
     )
     with (
         patch(
-            "custom_components.ha_tfi_live.config_flow.async_get_clientsession",
+            "custom_components.tfi_live.config_flow.async_get_clientsession",
             return_value=MagicMock(),
         ),
         patch(
-            "custom_components.ha_tfi_live.config_flow.GtfsRtClient",
+            "custom_components.tfi_live.config_flow.GtfsRtClient",
             MagicMock(return_value=client),
         ),
     ):
@@ -1065,7 +1065,7 @@ def options_flow(mock_hass: MagicMock) -> TfiLiveOptionsFlowHandler:
     }
     mock_entry = MagicMock()
     mock_entry.data = existing_data
-    mock_entry.domain = "ha_tfi_live"
+    mock_entry.domain = "tfi_live"
 
     # config_entry is a read-only property on OptionsFlow that calls
     # hass.config_entries.async_get_known_entry(handler).  Wire up the mock

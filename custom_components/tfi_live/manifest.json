@@ -1,5 +1,5 @@
 {
-  "domain": "ha_tfi_live",
+  "domain": "tfi_live",
   "name": "TFI Live",
   "codeowners": [
     "@nocalla"

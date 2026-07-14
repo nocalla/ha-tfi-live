@@ -4,22 +4,22 @@
 "area: config-flow":
   - changed-files:
       - any-glob-to-any-file:
-          - custom_components/ha_tfi_live/config_flow.py
-          - custom_components/ha_tfi_live/strings.json
-          - custom_components/ha_tfi_live/translations/**
+          - custom_components/tfi_live/config_flow.py
+          - custom_components/tfi_live/strings.json
+          - custom_components/tfi_live/translations/**
 
 "area: coordinator":
   - changed-files:
       - any-glob-to-any-file:
-          - custom_components/ha_tfi_live/coordinator.py
-          - custom_components/ha_tfi_live/__init__.py
-          - custom_components/ha_tfi_live/diagnostics.py
+          - custom_components/tfi_live/coordinator.py
+          - custom_components/tfi_live/__init__.py
+          - custom_components/tfi_live/diagnostics.py
 
 "area: sensor":
   - changed-files:
       - any-glob-to-any-file:
-          - custom_components/ha_tfi_live/sensor.py
-          - custom_components/ha_tfi_live/icons.json
+          - custom_components/tfi_live/sensor.py
+          - custom_components/tfi_live/icons.json
 
 "area: tests":
   - changed-files:
@@ -43,4 +43,4 @@
       - any-glob-to-any-file:
           - pyproject.toml
           - uv.lock
-          - custom_components/ha_tfi_live/manifest.json
+          - custom_components/tfi_live/manifest.json

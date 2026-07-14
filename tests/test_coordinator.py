@@ -1,4 +1,4 @@
-"""Tests for custom_components.ha_tfi_live.coordinator.TfiLiveCoordinator.
+"""Tests for custom_components.tfi_live.coordinator.TfiLiveCoordinator.
 
 Covers: update interval, successful fetch parsing, last-successful-fetch
 tracking, GtfsRtFetchError handling and log deduplication,
@@ -26,7 +26,7 @@ from nta_gtfs import (
     TripUpdate,
 )
 
-from custom_components.ha_tfi_live.coordinator import TfiLiveCoordinator
+from custom_components.tfi_live.coordinator import TfiLiveCoordinator
 
 # ---------------------------------------------------------------------------
 # A minimal TripUpdate returned by the mocked GtfsRtClient
@@ -210,7 +210,7 @@ async def test_fetch_error_logs_warning_once(coordinator, mock_rt_client, caplog
     mock_rt_client.async_fetch_trip_updates.side_effect = GtfsRtFetchError("HTTP 500")
 
     with caplog.at_level(
-        logging.WARNING, logger="custom_components.ha_tfi_live.coordinator"
+        logging.WARNING, logger="custom_components.tfi_live.coordinator"
     ):
         for _ in range(2):
             with pytest.raises(UpdateFailed):
@@ -232,7 +232,7 @@ async def test_fetch_error_second_call_no_extra_log(
     mock_rt_client.async_fetch_trip_updates.side_effect = GtfsRtFetchError("HTTP 500")
 
     with caplog.at_level(
-        logging.WARNING, logger="custom_components.ha_tfi_live.coordinator"
+        logging.WARNING, logger="custom_components.tfi_live.coordinator"
     ):
         with pytest.raises(UpdateFailed):
             await coordinator._async_update_data()
@@ -272,7 +272,7 @@ async def test_auth_error_logs_error_once(coordinator, mock_rt_client, caplog):
     mock_rt_client.async_fetch_trip_updates.side_effect = GtfsRtAuthError("HTTP 401")
 
     with caplog.at_level(
-        logging.ERROR, logger="custom_components.ha_tfi_live.coordinator"
+        logging.ERROR, logger="custom_components.tfi_live.coordinator"
     ):
         with pytest.raises(ConfigEntryAuthFailed):
             await coordinator._async_update_data()
@@ -304,7 +304,7 @@ async def test_parse_error_logs_error(coordinator, mock_rt_client, caplog):
     mock_rt_client.async_fetch_trip_updates.side_effect = GtfsRtParseError("bad json")
 
     with caplog.at_level(
-        logging.ERROR, logger="custom_components.ha_tfi_live.coordinator"
+        logging.ERROR, logger="custom_components.tfi_live.coordinator"
     ):
         with pytest.raises(UpdateFailed):
             await coordinator._async_update_data()
@@ -471,7 +471,7 @@ async def test_refresh_static_failure_logs_warning_and_swallows(
         side_effect=StaticGtfsLoadError("HTTP 500")
     )
 
-    with caplog.at_level(logging.WARNING, logger="custom_components.ha_tfi_live"):
+    with caplog.at_level(logging.WARNING, logger="custom_components.tfi_live"):
         await coordinator._async_refresh_static()
 
     warnings = [r for r in caplog.records if r.levelname == "WARNING"]

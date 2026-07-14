@@ -24,6 +24,13 @@ dev = [
     "mypy>=2.1.0",
 ]
 
+# Hatchling's default wheel file-selection heuristic looks for a root-level
+# directory matching the normalized project name ("ha_tfi_live"). The actual
+# integration package now lives at custom_components/tfi_live, so the target
+# must be pointed at it explicitly rather than relying on the heuristic.
+[tool.hatch.build.targets.wheel]
+packages = ["custom_components/tfi_live"]
+
 [tool.ruff]
 line-length = 88
 
@@ -37,7 +44,7 @@ testpaths = ["tests"]
 # Disable the pytest-homeassistant-custom-component plugin: it unconditionally
 # imports homeassistant.runner which pulls in the POSIX-only fcntl module and
 # crashes on Windows.  Tests use only unittest.mock.
-addopts = "-p no:homeassistant --cov=custom_components/ha_tfi_live --cov-fail-under=95"
+addopts = "-p no:homeassistant --cov=custom_components/tfi_live --cov-fail-under=95"
 
 [tool.mypy]
 strict = true
