@@ -4,7 +4,7 @@ Thanks for your interest in contributing! This document covers how to set up a
 development environment, the project's conventions, and how releases are cut.
 
 HA TFI Live is a [HACS](https://hacs.xyz)-compatible Home Assistant custom
-integration (domain `ha_tfi_live`) that surfaces real-time Irish public
+integration (domain `tfi_live`) that surfaces real-time Irish public
 transport departures from the NTA GTFS-RT feed.
 
 ## Development setup
@@ -37,7 +37,7 @@ required.
 
 - **Google-style docstrings** on all functions, public and private.
 - **Type hints** on every function signature, no exceptions. CI runs `mypy`
-  in strict mode against `custom_components/ha_tfi_live`.
+  in strict mode against `custom_components/tfi_live`.
 - **Config flow only** — no YAML `platform:` setup support.
 - **GTFS fetch/parse logic lives in the library, not here.** All real-time and
   static GTFS fetching and parsing belongs in the separate
@@ -96,13 +96,13 @@ drafting is needed:
 
 1. Runs the full test suite (the release aborts if tests fail).
 2. Bumps the version (per the chosen bump type) in:
-   - `custom_components/ha_tfi_live/manifest.json` (the source of truth for
+   - `custom_components/tfi_live/manifest.json` (the source of truth for
      the current version),
    - `pyproject.toml`,
    - the Release badge in `README.md`.
 3. Commits the changes as `chore: release vX.Y.Z`, tags `vX.Y.Z`, and pushes
    both to `main`.
-4. Builds `ha-tfi-live.zip` from `custom_components/ha_tfi_live/`.
+4. Builds `ha-tfi-live.zip` from `custom_components/tfi_live/`.
 5. Creates a GitHub release for the tag with auto-generated release notes and
    the zip attached.
 

@@ -12,6 +12,8 @@ A Home Assistant custom integration for real-time Irish public transport departu
 
 Each configured sensor reports the minutes to the next departure for a given stop and route, with up to three upcoming departures available as attributes. The sensor state is an integer suitable for use in automations (e.g. "leave when the next bus is 8 minutes away").
 
+> **Breaking change:** the integration's internal domain was renamed from `ha_tfi_live` to `tfi_live`. Home Assistant does not migrate config entries across a domain rename, so upgrading past this version requires removing and re-adding the integration.
+
 ## Features
 
 - Minutes to next departure as sensor state (integer, truncated toward zero)
@@ -36,7 +38,7 @@ Each configured sensor reports the minutes to the next departure for a given sto
 
 ### Manual
 
-1. Copy `custom_components/ha_tfi_live/` into your HA `config/custom_components/` directory.
+1. Copy `custom_components/tfi_live/` into your HA `config/custom_components/` directory.
 2. Restart Home Assistant.
 
 ## Configuration
@@ -73,7 +75,7 @@ To remove the integration:
 2. Confirm the deletion. All associated entities are removed immediately.
 3. Re-adding the integration later will restore your sensors from the configuration you enter during setup.
 
-For **manual installs**: delete the `custom_components/ha_tfi_live/` directory from your HA config directory and restart Home Assistant.
+For **manual installs**: delete the `custom_components/tfi_live/` directory from your HA config directory and restart Home Assistant.
 ## Entity Model
 
 **State:** Integer minutes to the next departure (truncated toward zero). `None` when no upcoming service is found or when the feed has not been updated within the last 3 minutes.

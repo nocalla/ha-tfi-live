@@ -1,6 +1,6 @@
 """End-to-end integration tests for async_setup_entry and async_unload_entry.
 
-T-012: exercises the full setup/teardown lifecycle of the ha_tfi_live integration
+T-012: exercises the full setup/teardown lifecycle of the tfi_live integration
 with mocked library clients.  No live network calls are made at any point.
 pytest-homeassistant-custom-component fixtures are deliberately avoided because
 that plugin crashes on Windows (see conftest.py for details).
@@ -53,12 +53,12 @@ from nta_gtfs import (
     TripUpdate,
 )
 
-from custom_components.ha_tfi_live.__init__ import (
+from custom_components.tfi_live.__init__ import (
     async_migrate_entry,
     async_setup_entry,
     async_unload_entry,
 )
-from custom_components.ha_tfi_live.const import (
+from custom_components.tfi_live.const import (
     CONF_API_KEY,
     CONF_SENSORS,
     CONF_STATIC_GTFS_URL,
@@ -191,7 +191,7 @@ def _base_patches(
     with (
         patch("homeassistant.helpers.frame.report_usage"),
         patch(
-            "custom_components.ha_tfi_live.__init__.async_get_clientsession",
+            "custom_components.tfi_live.__init__.async_get_clientsession",
             return_value=MagicMock(),
         ),
         patch.object(StaticGtfsClient, "async_load", static_mock),
@@ -274,7 +274,7 @@ async def test_setup_entry_passes_configured_stop_ids_to_static_client() -> None
         with (
             _base_patches(),
             patch(
-                "custom_components.ha_tfi_live.__init__.StaticGtfsClient",
+                "custom_components.tfi_live.__init__.StaticGtfsClient",
                 static_client_cls,
             ),
         ):
@@ -341,9 +341,7 @@ async def test_background_static_load_error_logs_warning(caplog) -> None:
         with _base_patches(static_load_side_effect=StaticGtfsLoadError("HTTP 500")):
             result = await async_setup_entry(hass, entry)
 
-            with caplog.at_level(
-                logging.WARNING, logger="custom_components.ha_tfi_live"
-            ):
+            with caplog.at_level(logging.WARNING, logger="custom_components.tfi_live"):
                 await entry.background_coros[0]
     finally:
         current_entry.reset(token)

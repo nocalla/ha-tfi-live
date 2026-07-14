@@ -1,4 +1,4 @@
-"""Tests for custom_components.ha_tfi_live.diagnostics.
+"""Tests for custom_components.tfi_live.diagnostics.
 
 Covers async_get_config_entry_diagnostics: verifies that the API key is
 redacted and that the expected top-level keys are present.
@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from custom_components.ha_tfi_live.diagnostics import async_get_config_entry_diagnostics
+from custom_components.tfi_live.diagnostics import async_get_config_entry_diagnostics
 
 
 @pytest.fixture

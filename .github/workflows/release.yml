@@ -51,7 +51,7 @@ jobs:
 
           bump = os.environ["BUMP"]
 
-          with open("custom_components/ha_tfi_live/manifest.json") as f:
+          with open("custom_components/tfi_live/manifest.json") as f:
               manifest = json.load(f)
 
           current = manifest["version"]
@@ -67,7 +67,7 @@ jobs:
           new_version = f"{major}.{minor}.{patch}"
 
           manifest["version"] = new_version
-          with open("custom_components/ha_tfi_live/manifest.json", "w") as f:
+          with open("custom_components/tfi_live/manifest.json", "w") as f:
               json.dump(manifest, f, indent=2)
               f.write("\n")
 
@@ -105,7 +105,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add custom_components/ha_tfi_live/manifest.json pyproject.toml README.md
+          git add custom_components/tfi_live/manifest.json pyproject.toml README.md
           git commit -m "chore: release ${{ steps.bump.outputs.tag }}"
           git tag ${{ steps.bump.outputs.tag }}
           git push origin main
@@ -114,7 +114,7 @@ jobs:
       - name: Build integration zip
         run: |
           cd custom_components
-          zip -r ../ha-tfi-live.zip ha_tfi_live/
+          zip -r ../ha-tfi-live.zip tfi_live/
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2

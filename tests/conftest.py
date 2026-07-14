@@ -1,4 +1,4 @@
-"""Pytest configuration for ha_tfi_live tests.
+"""Pytest configuration for tfi_live tests.
 
 Blocks the ``pytest-homeassistant-custom-component`` plugin at startup.  That
 plugin unconditionally imports ``homeassistant.runner`` which pulls in the
