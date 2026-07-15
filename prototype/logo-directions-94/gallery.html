@@ -1,0 +1,410 @@
+<title>TFI Live — logo directions</title>
+<style>
+  :root {
+    --paper: #f3f4f2;
+    --paper-raised: #ffffff;
+    --ink: #1b2320;
+    --ink-dim: #57615c;
+    --line: rgba(27, 35, 32, 0.12);
+    --chrome-accent: #3d5266;
+    --chrome-accent-ink: #ffffff;
+    --mono: ui-monospace, "SFMono-Regular", "Cascadia Mono", Consolas, monospace;
+    --sans: -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  }
+  :root[data-theme="dark"] {
+    --paper: #14171a;
+    --paper-raised: #1b1f23;
+    --ink: #e8eae7;
+    --ink-dim: #98a19c;
+    --line: rgba(232, 234, 231, 0.14);
+    --chrome-accent: #7d97ac;
+    --chrome-accent-ink: #0f1214;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #14171a;
+      --paper-raised: #1b1f23;
+      --ink: #e8eae7;
+      --ink-dim: #98a19c;
+      --line: rgba(232, 234, 231, 0.14);
+      --chrome-accent: #7d97ac;
+      --chrome-accent-ink: #0f1214;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    padding: 48px 24px 96px;
+  }
+  main { max-width: 1040px; margin: 0 auto; }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+    margin: 0 0 10px;
+  }
+  h1 {
+    font-size: clamp(28px, 4vw, 40px);
+    font-weight: 800;
+    letter-spacing: -0.01em;
+    line-height: 1.1;
+    margin: 0 0 12px;
+    text-wrap: balance;
+  }
+  .brief {
+    max-width: 62ch;
+    color: var(--ink-dim);
+    line-height: 1.55;
+    margin: 0 0 6px;
+  }
+  .assumption {
+    max-width: 62ch;
+    line-height: 1.55;
+    font-size: 14px;
+    color: var(--ink-dim);
+    border-left: 2px solid var(--line);
+    padding-left: 12px;
+    margin: 20px 0 40px;
+  }
+  .assumption strong { color: var(--ink); }
+
+  .spec-sheet {
+    background: var(--paper-raised);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 18px 20px;
+    margin-bottom: 48px;
+  }
+  .spec-sheet h2 {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--ink-dim);
+    margin: 0 0 12px;
+    font-weight: 700;
+  }
+  .spec-row {
+    display: grid;
+    grid-template-columns: 140px 100px 1fr;
+    gap: 16px;
+    font-family: var(--mono);
+    font-size: 13px;
+    padding: 6px 0;
+    border-top: 1px solid var(--line);
+    align-items: baseline;
+  }
+  .spec-row:first-of-type { border-top: none; }
+  .spec-row .dim { font-variant-numeric: tabular-nums; color: var(--ink); }
+  .spec-row .note { font-family: var(--sans); color: var(--ink-dim); font-size: 13px; }
+  .req { color: var(--ink); }
+  .opt { color: var(--ink-dim); }
+
+  .gallery-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 16px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+  }
+  .gallery-head h2 {
+    font-size: 15px;
+    font-weight: 700;
+    margin: 0;
+  }
+  .toggle {
+    font-family: var(--mono);
+    font-size: 12px;
+    background: var(--paper-raised);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 6px 6px;
+    display: inline-flex;
+    gap: 2px;
+  }
+  .toggle button {
+    font-family: var(--mono);
+    font-size: 12px;
+    border: none;
+    background: transparent;
+    color: var(--ink-dim);
+    padding: 6px 12px;
+    border-radius: 999px;
+    cursor: pointer;
+  }
+  .toggle button[aria-pressed="true"] {
+    background: var(--chrome-accent);
+    color: var(--chrome-accent-ink);
+  }
+  .toggle button:focus-visible {
+    outline: 2px solid var(--chrome-accent);
+    outline-offset: 2px;
+  }
+
+  .concepts {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 24px;
+    margin-bottom: 48px;
+  }
+  .card {
+    background: var(--paper-raised);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .card-label { font-family: var(--mono); font-size: 12px; color: var(--ink-dim); }
+  .card h3 { margin: 2px 0 0; font-size: 18px; font-weight: 800; letter-spacing: -0.01em; }
+  .card p.rationale { margin: 0; font-size: 13.5px; line-height: 1.5; color: var(--ink-dim); }
+
+  .swatch {
+    border-radius: 10px;
+    padding: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color 0.15s ease;
+  }
+  .swatch[data-backdrop="light"] { background: #eef0ee; }
+  .swatch[data-backdrop="dark"] { background: #1a1d1f; }
+  .swatch svg { width: 128px; height: 128px; display: block; }
+
+  .size-row {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    padding: 10px 4px;
+    border-top: 1px dashed var(--line);
+    border-bottom: 1px dashed var(--line);
+  }
+  .size-check { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  .size-check svg { display: block; }
+  .size-check .px {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--ink-dim);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .lockup {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border-radius: 8px;
+    padding: 10px 14px;
+  }
+  .lockup svg { width: 32px; height: 32px; flex: none; }
+  .lockup span {
+    font-weight: 800;
+    font-size: 16px;
+    letter-spacing: -0.01em;
+  }
+
+  footer {
+    max-width: 62ch;
+    font-size: 13px;
+    color: var(--ink-dim);
+    line-height: 1.6;
+    border-top: 1px solid var(--line);
+    padding-top: 20px;
+  }
+  footer code {
+    font-family: var(--mono);
+    background: var(--paper-raised);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 1px 5px;
+    font-size: 12px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; }
+  }
+</style>
+
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <!-- Concept A: Live Signal -->
+    <symbol id="logo-a" viewBox="0 0 256 256">
+      <rect x="0" y="0" width="256" height="256" rx="56" fill="#0f8f72"/>
+      <rect x="60" y="112" width="136" height="72" rx="16" fill="#ffffff"/>
+      <rect x="76" y="126" width="46" height="28" rx="6" fill="#0f8f72"/>
+      <rect x="134" y="126" width="46" height="28" rx="6" fill="#0f8f72"/>
+      <circle cx="92" cy="184" r="15" fill="#0b5c49"/>
+      <circle cx="92" cy="184" r="5" fill="#ffffff"/>
+      <circle cx="164" cy="184" r="15" fill="#0b5c49"/>
+      <circle cx="164" cy="184" r="5" fill="#ffffff"/>
+      <path d="M 190 66 A 20 20 0 0 1 210 86" fill="none" stroke="#ffffff" stroke-width="8" stroke-linecap="round"/>
+      <path d="M 190 48 A 38 38 0 0 1 228 86" fill="none" stroke="#ffffff" stroke-width="8" stroke-linecap="round" opacity="0.75"/>
+      <path d="M 190 30 A 56 56 0 0 1 246 86" fill="none" stroke="#ffffff" stroke-width="8" stroke-linecap="round" opacity="0.5"/>
+    </symbol>
+
+    <!-- Concept B: Pin + Clock -->
+    <symbol id="logo-b" viewBox="0 0 256 256">
+      <rect x="0" y="0" width="256" height="256" rx="56" fill="#4b2e83"/>
+      <path d="M128,50 C90,50 62,80 62,118 C62,168 128,214 128,214 C128,214 194,168 194,118 C194,80 166,50 128,50 Z" fill="#ffffff"/>
+      <circle cx="128" cy="116" r="36" fill="#4b2e83"/>
+      <line x1="128" y1="116" x2="128" y2="94" stroke="#ffffff" stroke-width="7" stroke-linecap="round"/>
+      <line x1="128" y1="116" x2="147" y2="128" stroke="#ffffff" stroke-width="7" stroke-linecap="round"/>
+      <circle cx="128" cy="116" r="4.5" fill="#ffffff"/>
+    </symbol>
+
+    <!-- Concept C: Route monogram -->
+    <symbol id="logo-c" viewBox="0 0 256 256">
+      <rect x="0" y="0" width="256" height="256" rx="56" fill="#14213d"/>
+      <path d="M 74 78 L 152 78" fill="none" stroke="#ffffff" stroke-width="15" stroke-linecap="round"/>
+      <path d="M 113 78 L 113 140" fill="none" stroke="#ffffff" stroke-width="15" stroke-linecap="round"/>
+      <path d="M 113 140 C 113 168 130 183 158 183 L 182 183" fill="none" stroke="#f4a52b" stroke-width="15" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="184" cy="183" r="16" fill="none" stroke="#ffffff" stroke-width="3" opacity="0.9"/>
+      <circle cx="184" cy="183" r="11" fill="#f4a52b"/>
+    </symbol>
+  </defs>
+</svg>
+
+<main>
+  <p class="eyebrow">Prototype — logo direction (issue #94)</p>
+  <h1>TFI Live needs a mark it can live with at 16px and at 256px.</h1>
+  <p class="brief">
+    Three structurally different concepts for the <code>tfi_live</code> icon —
+    each holds up as a flat glyph small enough for the HA sidebar and
+    distinct enough not to fold into a beige transit-app blur.
+  </p>
+  <p class="assumption">
+    <strong>Note:</strong> this adapts the usual variant-switcher pattern —
+    there's no app route to host the icon in, and logos are judged side by
+    side rather than one at a time, so all three concepts render together
+    below instead of behind a bottom-bar toggle. Use the light/dark control
+    to check each mark against both sidebar themes.
+  </p>
+
+  <div class="spec-sheet">
+    <h2>home-assistant/brands requirements</h2>
+    <div class="spec-row">
+      <span class="req">icon.png</span>
+      <span class="dim">256×256</span>
+      <span class="note">required. Square, transparent bg, no padding baked in.</span>
+    </div>
+    <div class="spec-row">
+      <span class="opt">icon@2x.png</span>
+      <span class="dim">512×512</span>
+      <span class="note">recommended, same art at 2×.</span>
+    </div>
+    <div class="spec-row">
+      <span class="opt">logo.png</span>
+      <span class="dim">≤512 wide</span>
+      <span class="note">optional wide lockup (icon + wordmark), min height 128px.</span>
+    </div>
+    <div class="spec-row">
+      <span class="opt">logo@2x.png</span>
+      <span class="dim">≤1024 wide</span>
+      <span class="note">optional, 2× of logo.png.</span>
+    </div>
+    <div class="spec-row">
+      <span class="opt">*_dark.png</span>
+      <span class="dim">—</span>
+      <span class="note">optional dark-theme variants of any of the above.</span>
+    </div>
+    <div class="spec-row">
+      <span class="req">location</span>
+      <span class="dim">—</span>
+      <span class="note">as of the Brands Proxy API (2026.3+), a local <code style="font-family:inherit">custom_components/tfi_live/brand/</code> folder satisfies this — no <code style="font-family:inherit">home-assistant/brands</code> PR needed (see #82, #97).</span>
+    </div>
+  </div>
+
+  <div class="gallery-head">
+    <h2>Three directions</h2>
+    <div class="toggle" role="group" aria-label="Preview backdrop">
+      <button type="button" data-backdrop-choice="light" aria-pressed="true">light sidebar</button>
+      <button type="button" data-backdrop-choice="dark" aria-pressed="false">dark sidebar</button>
+    </div>
+  </div>
+
+  <div class="concepts">
+    <article class="card">
+      <div>
+        <p class="card-label">Concept A</p>
+        <h3>Live Signal</h3>
+      </div>
+      <p class="rationale">A bus glyph with broadcast arcs — reads as transit first, "live" second. Warmest and friendliest of the three.</p>
+      <div class="swatch" data-backdrop="light"><svg><use href="#logo-a"/></svg></div>
+      <div class="size-row">
+        <div class="size-check"><svg width="48" height="48" viewBox="0 0 256 256"><use href="#logo-a"/></svg><span class="px">48px</span></div>
+        <div class="size-check"><svg width="24" height="24" viewBox="0 0 256 256"><use href="#logo-a"/></svg><span class="px">24px</span></div>
+        <div class="size-check"><svg width="16" height="16" viewBox="0 0 256 256"><use href="#logo-a"/></svg><span class="px">16px</span></div>
+      </div>
+      <div class="lockup" style="background:#0f8f72">
+        <svg viewBox="0 0 256 256"><use href="#logo-a"/></svg>
+        <span style="color:#fff">TFI Live</span>
+      </div>
+    </article>
+
+    <article class="card">
+      <div>
+        <p class="card-label">Concept B</p>
+        <h3>Pin + Clock</h3>
+      </div>
+      <p class="rationale">Leads with "real-time arrival" rather than "bus" — a map pin with a clock face cut into it. Reads well even if TFI later covers rail or bike-share too.</p>
+      <div class="swatch" data-backdrop="light"><svg><use href="#logo-b"/></svg></div>
+      <div class="size-row">
+        <div class="size-check"><svg width="48" height="48" viewBox="0 0 256 256"><use href="#logo-b"/></svg><span class="px">48px</span></div>
+        <div class="size-check"><svg width="24" height="24" viewBox="0 0 256 256"><use href="#logo-b"/></svg><span class="px">24px</span></div>
+        <div class="size-check"><svg width="16" height="16" viewBox="0 0 256 256"><use href="#logo-b"/></svg><span class="px">16px</span></div>
+      </div>
+      <div class="lockup" style="background:#4b2e83">
+        <svg viewBox="0 0 256 256"><use href="#logo-b"/></svg>
+        <span style="color:#fff">TFI Live</span>
+      </div>
+    </article>
+
+    <article class="card">
+      <div>
+        <p class="card-label">Concept C</p>
+        <h3>Route Monogram</h3>
+      </div>
+      <p class="rationale">Abstract T/L route line with an amber vehicle dot mid-journey — the most distinctive at a glance, no literal bus or pin. Best differentiation from other transit integrations' icons.</p>
+      <div class="swatch" data-backdrop="light"><svg><use href="#logo-c"/></svg></div>
+      <div class="size-row">
+        <div class="size-check"><svg width="48" height="48" viewBox="0 0 256 256"><use href="#logo-c"/></svg><span class="px">48px</span></div>
+        <div class="size-check"><svg width="24" height="24" viewBox="0 0 256 256"><use href="#logo-c"/></svg><span class="px">24px</span></div>
+        <div class="size-check"><svg width="16" height="16" viewBox="0 0 256 256"><use href="#logo-c"/></svg><span class="px">16px</span></div>
+      </div>
+      <div class="lockup" style="background:#14213d">
+        <svg viewBox="0 0 256 256"><use href="#logo-c"/></svg>
+        <span style="color:#fff">TFI Live</span>
+      </div>
+    </article>
+  </div>
+
+  <footer>
+    Once a direction wins: capture the choice (and why) as a comment on
+    <code>#82</code>, fold the final art into
+    <code>custom_components/tfi_live/brand/</code> as real
+    <code>icon.png</code> / <code>icon@2x.png</code> (and
+    <code>logo.png</code> if the lockup is wanted), and this page's markup
+    goes on a throwaway branch, not into <code>main</code>.
+  </footer>
+</main>
+
+<script>
+  (function () {
+    var buttons = document.querySelectorAll('[data-backdrop-choice]');
+    var swatches = document.querySelectorAll('.swatch');
+    buttons.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var choice = btn.getAttribute('data-backdrop-choice');
+        buttons.forEach(function (b) { b.setAttribute('aria-pressed', String(b === btn)); });
+        swatches.forEach(function (s) { s.setAttribute('data-backdrop', choice); });
+      });
+    });
+  })();
+</script>
