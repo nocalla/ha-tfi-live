@@ -37,6 +37,7 @@ StaticGtfsClient as ``stop_ids`` so the static parse only indexes those stops.
 
 import logging
 from contextlib import contextmanager
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -63,6 +64,10 @@ from custom_components.tfi_live.const import (
     CONF_SENSORS,
     CONF_STATIC_GTFS_URL,
     CONF_TRIP_UPDATE_URL,
+)
+from custom_components.tfi_live.sensor import TfiLiveSensor
+from custom_components.tfi_live.sensor import (
+    async_setup_entry as sensor_async_setup_entry,
 )
 
 # ---------------------------------------------------------------------------
@@ -516,3 +521,97 @@ async def test_unload_entry_returns_true() -> None:
 
     result = await async_unload_entry(hass, entry)
     assert result is True
+
+
+# ---------------------------------------------------------------------------
+# Issue #111: stop-wide sensor coexists with a route-filtered sensor
+# ---------------------------------------------------------------------------
+
+
+async def test_stop_wide_and_route_filtered_sensors_coexist_on_same_stop() -> None:
+    """Issue #111: route_id=None and route_id="46A" sensors on the same stop.
+
+    Arrange: entry with two sensors configured for the same stop — one
+        stop-wide (``route_id`` unset) and one route-filtered (``route_id`` =
+        "46A"); RT feed containing trip updates for two distinct routes
+        ("46A" and "145") both serving that stop.
+    Act: run the full integration setup (``async_setup_entry``), then forward
+        to the sensor platform's ``async_setup_entry`` using the resulting
+        coordinator, exactly as Home Assistant would via
+        ``async_forward_entry_setups``.
+    Assert:
+        - both entities are created without error
+        - the two sensors get distinct unique_ids
+        - the route-filtered sensor only sees the "46A" departure
+        - the stop-wide sensor merges departures across both routes
+    """
+    hass = _make_hass()
+    entry = _make_entry(
+        sensors=[
+            {"stop_id": "STOP_A", "route_id": None, "name": "All Routes"},
+            {"stop_id": "STOP_A", "route_id": "46A", "name": "46A Only"},
+        ]
+    )
+
+    # Departure timestamps are computed relative to "now" (rather than reusing
+    # the fixed timestamps in _VALID_TRIP_UPDATE) so they fall inside the
+    # sensor's grace window regardless of when the test suite runs.
+    now_ts = int(datetime.now(UTC).timestamp())
+    route_46a_update = TripUpdate(
+        trip_id="TRIP_001",
+        route_id="46A",
+        direction_id="0",
+        start_date="20260517",
+        stop_time_updates=[
+            StopTimeUpdate(
+                stop_id="STOP_A",
+                arrival_delay=120,
+                departure_delay=120,
+                arrival_time=now_ts + 300,
+                departure_time=now_ts + 360,
+            )
+        ],
+    )
+    route_145_update = TripUpdate(
+        trip_id="TRIP_002",
+        route_id="145",
+        direction_id="0",
+        start_date="20260517",
+        stop_time_updates=[
+            StopTimeUpdate(
+                stop_id="STOP_A",
+                arrival_delay=0,
+                departure_delay=0,
+                arrival_time=now_ts + 400,
+                departure_time=now_ts + 460,
+            )
+        ],
+    )
+
+    token = current_entry.set(entry)
+    try:
+        with _base_patches(rt_return_value=[route_46a_update, route_145_update]):
+            result = await async_setup_entry(hass, entry)
+    finally:
+        current_entry.reset(token)
+        for coro in entry.background_coros:
+            coro.close()
+
+    assert result is True
+
+    added: list[TfiLiveSensor] = []
+
+    def _add_entities(entities, update_before_add=False):
+        added.extend(entities)
+
+    await sensor_async_setup_entry(hass, entry, _add_entities)
+
+    assert len(added) == 2
+    stop_wide, filtered = added
+    assert stop_wide.unique_id != filtered.unique_id
+
+    filtered_trip_ids = {d["trip_id"] for d in filtered._get_departures()}
+    stop_wide_trip_ids = {d["trip_id"] for d in stop_wide._get_departures()}
+
+    assert filtered_trip_ids == {"TRIP_001"}
+    assert stop_wide_trip_ids == {"TRIP_001", "TRIP_002"}
