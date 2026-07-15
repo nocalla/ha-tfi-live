@@ -1,9 +1,10 @@
 """Config flow for the TFI Live integration.
 
 Handles the two-step initial setup (step 1: integration-level settings;
-step 2: add one or more sensors), the re-authentication flow triggered
-when the GTFS-RT feed returns HTTP 401, the reconfiguration flow for
-updating credentials, and the options flow for adding sensors after setup.
+step 2: add one or more sensors via a searchable stop/route picker), the
+re-authentication flow triggered when the GTFS-RT feed returns HTTP 401,
+the reconfiguration flow for updating credentials, and the options flow
+for adding sensors after setup.
 """
 
 from __future__ import annotations
@@ -11,16 +12,32 @@ from __future__ import annotations
 import asyncio
 import logging
 import urllib.parse
+from collections.abc import Callable
 from typing import Any
 
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.config_entries import ConfigEntry, ConfigFlowResult
-from homeassistant.core import callback
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from nta_gtfs import GtfsRtAuthError, GtfsRtClient, GtfsRtParseError
+from homeassistant.helpers.selector import (
+    SelectOptionDict,
+    SelectSelector,
+    SelectSelectorConfig,
+    SelectSelectorMode,
+)
+from nta_gtfs import (
+    GtfsRtAuthError,
+    GtfsRtClient,
+    GtfsRtParseError,
+    Route,
+    StaticGtfsLoadError,
+    StaticGtfsPickerClient,
+    Stop,
+)
 
 from .const import (
+    ALL_ROUTES_SENTINEL,
     CONF_API_KEY,
     CONF_DIRECTION_ID,
     CONF_OPERATOR_ID,
@@ -41,6 +58,8 @@ _SENSOR_NAME_KEY = "name"
 # Sentinel used for the post-sensor-add menu choice.
 _MENU_ADD_ANOTHER = "add_another"
 _MENU_FINISH = "finish"
+
+_ALL_ROUTES_LABEL = "All routes at this stop"
 
 
 def _url_validator(value: str) -> str:
@@ -108,12 +127,325 @@ async def _probe_feed(
         errors["base"] = "cannot_connect"
 
 
-class TfiLiveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+def _build_stop_options(stops: list[Stop]) -> list[SelectOptionDict]:
+    """Build sorted select options for the stop-picker step.
+
+    Args:
+        stops: Stops parsed from the static GTFS feed's ``stops.txt``.
+
+    Returns:
+        Select options keyed by real ``stop_id``, labelled with the
+        rider-facing ``stop_code`` (falling back to ``stop_id`` when
+        ``stop_code`` is blank) and ``stop_name``, sorted by label.
+    """
+    options = [
+        SelectOptionDict(
+            value=stop.stop_id,
+            label=f"{stop.stop_code or stop.stop_id} — {stop.stop_name}",
+        )
+        for stop in stops
+    ]
+    options.sort(key=lambda opt: opt["label"])
+    return options
+
+
+def _build_route_options(
+    routes: list[Route], *, show_agency: bool
+) -> list[SelectOptionDict]:
+    """Build sorted select options for the route-picker step.
+
+    Args:
+        routes: Routes to offer — either narrowed to a specific stop or the
+            full nationwide list.
+        show_agency: When ``True`` (the unnarrowed fallback list), the
+            agency ID is appended to each label to help distinguish
+            same-numbered routes from different operators, since the
+            structural stop-narrowing that normally resolves this
+            collision isn't available in the fallback list.
+
+    Returns:
+        Select options keyed by real ``route_id``, with a pinned "All
+        routes at this stop" entry first, followed by the routes sorted
+        by label.
+    """
+    route_options = [
+        SelectOptionDict(
+            value=route.route_id,
+            label=(
+                f"{route.route_short_name} ({route.agency_id or 'unknown agency'})"
+                if show_agency
+                else route.route_short_name
+            ),
+        )
+        for route in routes
+    ]
+    route_options.sort(key=lambda opt: opt["label"])
+    return [
+        SelectOptionDict(value=ALL_ROUTES_SENTINEL, label=_ALL_ROUTES_LABEL),
+        *route_options,
+    ]
+
+
+class _SensorPickerFlow:
+    """Shared stop/route picker steps used by both the config and options flows.
+
+    Holds the session-scoped :class:`StaticGtfsPickerClient` used across
+    both picker steps and every sensor added within one flow run (including
+    repeated "add another" loops), and the two step implementations
+    themselves. Concrete flow handlers must initialise
+    ``self._picker_client`` and ``self._pending_stop_id`` to ``None`` and
+    implement :meth:`_static_gtfs_url` and :meth:`_append_sensor`.
+    """
+
+    hass: HomeAssistant
+    _picker_client: StaticGtfsPickerClient | None
+    _pending_stop_id: str | None
+    # Provided by the concrete FlowHandler subclass (ConfigFlow/OptionsFlow);
+    # annotated here (not implemented) so this mixin doesn't shadow them.
+    async_show_form: Callable[..., ConfigFlowResult]
+    async_show_menu: Callable[..., ConfigFlowResult]
+
+    def _static_gtfs_url(self) -> str:
+        """Return the static GTFS feed URL to build the picker client from.
+
+        Returns:
+            The static GTFS feed URL for the flow currently in progress.
+        """
+        raise NotImplementedError
+
+    def _append_sensor(self, sensor_config: dict[str, Any]) -> None:
+        """Store a completed sensor config on the concrete flow.
+
+        Args:
+            sensor_config: The sensor configuration to stage for saving.
+        """
+        raise NotImplementedError
+
+    async def _get_picker_client(self) -> StaticGtfsPickerClient:
+        """Return the session-scoped picker client, loading it on first use.
+
+        Constructs and loads exactly one ``StaticGtfsPickerClient`` per flow
+        run, reused across both picker steps and every sensor added in that
+        run. Left unset on load failure so the next attempt retries rather
+        than reusing a half-loaded client.
+
+        Returns:
+            The loaded, session-scoped picker client.
+
+        Raises:
+            StaticGtfsLoadError: If the static GTFS archive can't be
+                downloaded or parsed.
+        """
+        if self._picker_client is None:
+            client = StaticGtfsPickerClient(
+                self._static_gtfs_url(), async_get_clientsession(self.hass)
+            )
+            await client.async_load()
+            self._picker_client = client
+        return self._picker_client
+
+    async def async_step_stop(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Handle the stop-search step of the sensor picker.
+
+        Presents a searchable dropdown of every stop in the static GTFS
+        feed, keyed by real ``stop_id`` but labelled with the rider-facing
+        stop code and name. On submission, stores the picked stop and
+        advances to :meth:`async_step_route`.
+
+        Args:
+            user_input: Form data submitted by the user, or ``None`` when
+                the form is first rendered.
+
+        Returns:
+            A ConfigFlowResult that either re-shows the form with a load
+            error, or advances to :meth:`async_step_route`.
+        """
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            self._pending_stop_id = user_input[CONF_STOP_ID]
+            return await self.async_step_route()
+
+        stops: list[Stop] = []
+        try:
+            client = await self._get_picker_client()
+            stops = client.list_stops()
+        except StaticGtfsLoadError as exc:
+            _LOGGER.warning("Static GTFS picker load failed: %s", exc)
+            errors["base"] = "cannot_load_static_gtfs"
+
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_STOP_ID): SelectSelector(
+                    SelectSelectorConfig(
+                        options=_build_stop_options(stops),
+                        mode=SelectSelectorMode.DROPDOWN,
+                    )
+                ),
+            }
+        )
+        return self.async_show_form(
+            step_id="stop",
+            data_schema=schema,
+            errors=errors,
+        )
+
+    async def async_step_route(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Handle the route-narrowing step of the sensor picker.
+
+        Presents a dropdown narrowed to routes with a real ``stop_times.txt``
+        link to the picked stop, with a pinned "All routes at this stop"
+        entry that leaves ``route_id`` unset for stop-wide monitoring. Falls
+        back to the full nationwide route list (agency-labelled) when the
+        narrowed list is empty. Also collects the sensor's name, direction,
+        and operator. On submission, stages the sensor and advances to
+        :meth:`async_step_sensor_menu`.
+
+        Args:
+            user_input: Form data submitted by the user, or ``None`` when
+                the form is first rendered.
+
+        Returns:
+            A ConfigFlowResult that re-shows the form with errors, or
+            advances to :meth:`async_step_sensor_menu`.
+        """
+        errors: dict[str, str] = {}
+        stop_id = self._pending_stop_id
+        if stop_id is None:
+            # Only reachable if async_step_route is entered directly without
+            # going through async_step_stop first.
+            raise ValueError("async_step_route reached with no pending stop_id")
+
+        if user_input is not None:
+            name: str = user_input.get(_SENSOR_NAME_KEY, "").strip()
+            route_id_raw: str = user_input[CONF_ROUTE_ID]
+            direction_id_raw: str = user_input.get(CONF_DIRECTION_ID, "").strip()
+            operator_id: str = user_input.get(CONF_OPERATOR_ID, "").strip()
+
+            if not name:
+                errors[_SENSOR_NAME_KEY] = "required"
+
+            direction_id: int | None = None
+            if direction_id_raw:
+                try:
+                    direction_id = int(direction_id_raw)
+                    if direction_id not in (0, 1):
+                        errors[CONF_DIRECTION_ID] = "invalid_direction"
+                        direction_id = None
+                except ValueError:
+                    errors[CONF_DIRECTION_ID] = "invalid_direction"
+
+            if not errors:
+                route_id: str | None = (
+                    None if route_id_raw == ALL_ROUTES_SENTINEL else route_id_raw
+                )
+                self._append_sensor(
+                    {
+                        _SENSOR_NAME_KEY: name,
+                        CONF_STOP_ID: stop_id,
+                        CONF_ROUTE_ID: route_id,
+                        CONF_DIRECTION_ID: direction_id,
+                        CONF_OPERATOR_ID: operator_id or None,
+                    }
+                )
+                self._pending_stop_id = None
+                return await self.async_step_sensor_menu()
+
+        routes: list[Route] = []
+        show_agency = False
+        try:
+            client = await self._get_picker_client()
+            routes = await client.async_get_routes_for_stop(stop_id)
+            if not routes:
+                routes = client.list_routes()
+                show_agency = True
+                errors["base"] = "route_list_not_narrowed"
+        except StaticGtfsLoadError as exc:
+            _LOGGER.warning("Static GTFS picker load failed: %s", exc)
+            errors["base"] = "cannot_load_static_gtfs"
+
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_ROUTE_ID): SelectSelector(
+                    SelectSelectorConfig(
+                        options=_build_route_options(routes, show_agency=show_agency),
+                        mode=SelectSelectorMode.DROPDOWN,
+                    )
+                ),
+                vol.Required(_SENSOR_NAME_KEY): str,
+                vol.Optional(CONF_DIRECTION_ID, default=""): str,
+                vol.Optional(CONF_OPERATOR_ID, default=""): str,
+            }
+        )
+        return self.async_show_form(
+            step_id="route",
+            data_schema=schema,
+            errors=errors,
+        )
+
+    async def async_step_sensor_menu(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Show the post-add menu offering to add another sensor or finish.
+
+        HA requires the ``step_id`` of a menu result to name a real step
+        method on the handler, so the menu must live in its own step
+        rather than being returned inline from :meth:`async_step_route`.
+
+        Args:
+            user_input: Unused; present to satisfy the HA flow handler
+                protocol.
+
+        Returns:
+            A ConfigFlowResult showing the add-another/finish menu.
+        """
+        return self.async_show_menu(
+            step_id="sensor_menu",
+            menu_options=[_MENU_ADD_ANOTHER, _MENU_FINISH],
+        )
+
+    async def async_step_add_another(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Handle the 'Add another sensor' menu choice.
+
+        Loops back to :meth:`async_step_stop` so the user can configure
+        an additional sensor, reusing the same session-scoped picker
+        client.
+
+        Args:
+            user_input: Unused; present to satisfy the HA flow handler
+                protocol.
+
+        Returns:
+            A ConfigFlowResult delegating to :meth:`async_step_stop`.
+        """
+        return await self.async_step_stop()
+
+    @callback
+    def async_remove(self) -> None:
+        """Close the session-scoped picker client when the flow is discarded.
+
+        Home Assistant calls this once a flow is removed from the
+        in-progress list, whether it finished, aborted, or was abandoned.
+        The close itself is scheduled as a background task since this hook
+        is synchronous.
+        """
+        if self._picker_client is not None:
+            client, self._picker_client = self._picker_client, None
+            self.hass.async_create_task(client.async_close())
+
+
+class TfiLiveConfigFlow(_SensorPickerFlow, config_entries.ConfigFlow, domain=DOMAIN):
     """Handle the multi-step config flow for TFI Live.
 
     Step 1 collects integration-level settings (API key and feed URLs).
-    Step 2 collects sensor-level settings (stop/route) and can be repeated
-    to add multiple sensors before the entry is finalised.
+    Step 2 collects one or more sensors via the stop/route picker and can be
+    repeated to add multiple sensors before the entry is finalised.
     """
 
     VERSION = 1
@@ -125,6 +457,24 @@ class TfiLiveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Initialise the config flow with an empty staged config."""
         self._config: dict[str, Any] = {}
         self._entry: config_entries.ConfigEntry | None = None
+        self._picker_client: StaticGtfsPickerClient | None = None
+        self._pending_stop_id: str | None = None
+
+    def _static_gtfs_url(self) -> str:
+        """Return the static GTFS feed URL staged from step 1.
+
+        Returns:
+            The static GTFS feed URL entered on the step 1 form.
+        """
+        return str(self._config[CONF_STATIC_GTFS_URL])
+
+    def _append_sensor(self, sensor_config: dict[str, Any]) -> None:
+        """Append a completed sensor config to the staged entry data.
+
+        Args:
+            sensor_config: The sensor configuration to stage for saving.
+        """
+        self._config[CONF_SENSORS].append(sensor_config)
 
     @staticmethod
     @callback
@@ -158,7 +508,7 @@ class TfiLiveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         Returns:
             A ConfigFlowResult that either re-shows the form with field errors
-            or advances to :meth:`async_step_sensor`.
+            or advances to :meth:`async_step_stop`.
         """
         await self.async_set_unique_id(DOMAIN)
         self._abort_if_unique_id_configured()
@@ -195,7 +545,7 @@ class TfiLiveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_STATIC_GTFS_URL: static_gtfs_url,
                     CONF_SENSORS: [],
                 }
-                return await self.async_step_sensor()
+                return await self.async_step_stop()
 
         schema = vol.Schema(
             {
@@ -214,115 +564,6 @@ class TfiLiveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=schema,
             errors=errors,
         )
-
-    async def async_step_sensor(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """Handle step 2 — add a sensor.
-
-        Presents fields for one stop/route sensor. The step can be repeated
-        to add multiple sensors. After a successful submission the user is
-        offered a menu to add another sensor or finish setup.
-
-        Args:
-            user_input: Form data submitted by the user, or ``None`` when
-                the form is first rendered.
-
-        Returns:
-            A ConfigFlowResult that re-shows the form with errors, shows the
-            post-add menu, or (after finishing) creates the config entry.
-        """
-        errors: dict[str, str] = {}
-
-        if user_input is not None:
-            name: str = user_input.get(_SENSOR_NAME_KEY, "").strip()
-            stop_id: str = user_input.get(CONF_STOP_ID, "").strip()
-            route_id: str = user_input.get(CONF_ROUTE_ID, "").strip()
-            direction_id_raw: str = user_input.get(CONF_DIRECTION_ID, "").strip()
-            operator_id: str = user_input.get(CONF_OPERATOR_ID, "").strip()
-
-            if not name:
-                errors[_SENSOR_NAME_KEY] = "required"
-            if not stop_id:
-                errors[CONF_STOP_ID] = "required"
-            if not route_id:
-                errors[CONF_ROUTE_ID] = "required"
-
-            direction_id: int | None = None
-            if direction_id_raw:
-                try:
-                    direction_id = int(direction_id_raw)
-                    if direction_id not in (0, 1):
-                        errors[CONF_DIRECTION_ID] = "invalid_direction"
-                        direction_id = None
-                except ValueError:
-                    errors[CONF_DIRECTION_ID] = "invalid_direction"
-
-            if not errors:
-                sensor_config: dict[str, Any] = {
-                    _SENSOR_NAME_KEY: name,
-                    CONF_STOP_ID: stop_id,
-                    CONF_ROUTE_ID: route_id,
-                    CONF_DIRECTION_ID: direction_id,
-                    CONF_OPERATOR_ID: operator_id or None,
-                }
-                self._config[CONF_SENSORS].append(sensor_config)
-
-                return await self.async_step_sensor_menu()
-
-        schema = vol.Schema(
-            {
-                vol.Required(_SENSOR_NAME_KEY): str,
-                vol.Required(CONF_STOP_ID): str,
-                vol.Required(CONF_ROUTE_ID): str,
-                vol.Optional(CONF_DIRECTION_ID, default=""): str,
-                vol.Optional(CONF_OPERATOR_ID, default=""): str,
-            }
-        )
-
-        return self.async_show_form(
-            step_id="sensor",
-            data_schema=schema,
-            errors=errors,
-        )
-
-    async def async_step_sensor_menu(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """Show the post-add menu offering to add another sensor or finish.
-
-        HA requires the ``step_id`` of a menu result to name a real step
-        method on the handler, so the menu must live in its own step
-        rather than being returned inline from :meth:`async_step_sensor`.
-
-        Args:
-            user_input: Unused; present to satisfy the HA flow handler
-                protocol.
-
-        Returns:
-            A ConfigFlowResult showing the add-another/finish menu.
-        """
-        return self.async_show_menu(
-            step_id="sensor_menu",
-            menu_options=[_MENU_ADD_ANOTHER, _MENU_FINISH],
-        )
-
-    async def async_step_add_another(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """Handle the 'Add another sensor' menu choice.
-
-        Loops back to :meth:`async_step_sensor` so the user can configure
-        an additional stop/route without re-entering step 1 values.
-
-        Args:
-            user_input: Unused; present to satisfy the HA flow handler
-                protocol.
-
-        Returns:
-            A ConfigFlowResult delegating to :meth:`async_step_sensor`.
-        """
-        return await self.async_step_sensor()
 
     async def async_step_finish(
         self, user_input: dict[str, Any] | None = None
@@ -480,7 +721,7 @@ class TfiLiveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
 
-class TfiLiveOptionsFlowHandler(config_entries.OptionsFlow):
+class TfiLiveOptionsFlowHandler(_SensorPickerFlow, config_entries.OptionsFlow):
     """Options flow for managing sensors after initial setup.
 
     Mirrors the sensor-addition steps from the main config flow but
@@ -491,126 +732,38 @@ class TfiLiveOptionsFlowHandler(config_entries.OptionsFlow):
     def __init__(self) -> None:
         """Initialise the options flow with an empty staged sensor list."""
         self._new_sensors: list[dict[str, Any]] = []
+        self._picker_client: StaticGtfsPickerClient | None = None
+        self._pending_stop_id: str | None = None
+
+    def _static_gtfs_url(self) -> str:
+        """Return the static GTFS feed URL from the existing config entry.
+
+        Returns:
+            The static GTFS feed URL already stored on the config entry.
+        """
+        return str(self.config_entry.data[CONF_STATIC_GTFS_URL])
+
+    def _append_sensor(self, sensor_config: dict[str, Any]) -> None:
+        """Append a completed sensor config to the staged new-sensor list.
+
+        Args:
+            sensor_config: The sensor configuration to stage for saving.
+        """
+        self._new_sensors.append(sensor_config)
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Start the options flow by presenting the add-sensor form.
+        """Start the options flow by presenting the stop-search step.
 
         Args:
             user_input: Unused; delegated immediately to
-                :meth:`async_step_sensor`.
+                :meth:`async_step_stop`.
 
         Returns:
-            A ConfigFlowResult delegating to :meth:`async_step_sensor`.
+            A ConfigFlowResult delegating to :meth:`async_step_stop`.
         """
-        return await self.async_step_sensor()
-
-    async def async_step_sensor(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """Handle adding a new sensor in the options flow.
-
-        Presents the same stop/route/direction/operator fields as step 2 of
-        the initial config flow. After a successful submission the user is
-        offered a menu to add another sensor or finish.
-
-        Args:
-            user_input: Form data submitted by the user, or ``None`` when
-                the form is first rendered.
-
-        Returns:
-            A ConfigFlowResult that re-shows the form with errors, shows the
-            post-add menu, or finishes the options flow.
-        """
-        errors: dict[str, str] = {}
-
-        if user_input is not None:
-            name: str = user_input.get(_SENSOR_NAME_KEY, "").strip()
-            stop_id: str = user_input.get(CONF_STOP_ID, "").strip()
-            route_id: str = user_input.get(CONF_ROUTE_ID, "").strip()
-            direction_id_raw: str = user_input.get(CONF_DIRECTION_ID, "").strip()
-            operator_id: str = user_input.get(CONF_OPERATOR_ID, "").strip()
-
-            if not name:
-                errors[_SENSOR_NAME_KEY] = "required"
-            if not stop_id:
-                errors[CONF_STOP_ID] = "required"
-            if not route_id:
-                errors[CONF_ROUTE_ID] = "required"
-
-            direction_id: int | None = None
-            if direction_id_raw:
-                try:
-                    direction_id = int(direction_id_raw)
-                    if direction_id not in (0, 1):
-                        errors[CONF_DIRECTION_ID] = "invalid_direction"
-                        direction_id = None
-                except ValueError:
-                    errors[CONF_DIRECTION_ID] = "invalid_direction"
-
-            if not errors:
-                sensor_config: dict[str, Any] = {
-                    _SENSOR_NAME_KEY: name,
-                    CONF_STOP_ID: stop_id,
-                    CONF_ROUTE_ID: route_id,
-                    CONF_DIRECTION_ID: direction_id,
-                    CONF_OPERATOR_ID: operator_id or None,
-                }
-                self._new_sensors.append(sensor_config)
-
-                return await self.async_step_sensor_menu()
-
-        schema = vol.Schema(
-            {
-                vol.Required(_SENSOR_NAME_KEY): str,
-                vol.Required(CONF_STOP_ID): str,
-                vol.Required(CONF_ROUTE_ID): str,
-                vol.Optional(CONF_DIRECTION_ID, default=""): str,
-                vol.Optional(CONF_OPERATOR_ID, default=""): str,
-            }
-        )
-
-        return self.async_show_form(
-            step_id="sensor",
-            data_schema=schema,
-            errors=errors,
-        )
-
-    async def async_step_sensor_menu(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """Show the post-add menu offering to add another sensor or finish.
-
-        HA requires the ``step_id`` of a menu result to name a real step
-        method on the handler, so the menu must live in its own step
-        rather than being returned inline from :meth:`async_step_sensor`.
-
-        Args:
-            user_input: Unused; present to satisfy the HA flow handler
-                protocol.
-
-        Returns:
-            A ConfigFlowResult showing the add-another/finish menu.
-        """
-        return self.async_show_menu(
-            step_id="sensor_menu",
-            menu_options=[_MENU_ADD_ANOTHER, _MENU_FINISH],
-        )
-
-    async def async_step_add_another(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """Handle the 'Add another sensor' menu choice in the options flow.
-
-        Args:
-            user_input: Unused; present to satisfy the HA flow handler
-                protocol.
-
-        Returns:
-            A ConfigFlowResult delegating to :meth:`async_step_sensor`.
-        """
-        return await self.async_step_sensor()
+        return await self.async_step_stop()
 
     async def async_step_finish(
         self, user_input: dict[str, Any] | None = None

@@ -560,6 +560,30 @@ async def test_no_repairs_check_before_cache_available(
     delete.assert_not_called()
 
 
+async def test_stop_wide_sensor_skipped_by_unmatched_pair_check(
+    coordinator, mock_entry, mock_cache, mock_ir
+):
+    """Issue #109: a stop-wide sensor (route_id=None) never raises a Repairs issue.
+
+    ``has_scheduled_pair`` requires a real route_id; calling it with None
+    would return False for every stop-wide sensor regardless of whether the
+    stop itself is valid, producing a spurious "unmatched pair" warning on
+    every legitimately configured stop-wide sensor.
+    """
+    create, delete, _ = mock_ir
+    mock_cache.available = True
+    mock_cache.has_scheduled_pair = MagicMock(return_value=False)
+    mock_entry.data["sensors"] = [
+        {"name": "Any bus", "stop_id": "8370B2418801", "route_id": None}
+    ]
+
+    await coordinator._async_refresh_static()
+
+    mock_cache.has_scheduled_pair.assert_not_called()
+    create.assert_not_called()
+    delete.assert_not_called()
+
+
 async def test_shared_pair_produces_one_issue_naming_both_sensors(
     coordinator, mock_entry, mock_cache, mock_ir
 ):

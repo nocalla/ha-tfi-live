@@ -1,16 +1,20 @@
 """Tests for custom_components.tfi_live.config_flow.
 
 Covers re-auth preserving config, step 1 required field and URL validation,
-step 2 required field and direction_id validation, and repeated sensor
-addition.
+the stop/route picker steps (stop search, route narrowing, "All routes at
+this stop", fallback to the full agency-labelled list, picker load
+failures), and repeated sensor addition.
 
 Also covers issue #27 (API probe during step 1), issue #34 (reconfigure flow
-and options flow).
+and options flow), and issue #109 (searchable stop/route picker + stop-wide
+monitoring, resolving #107/#91).
 
 All tests use pytest-asyncio (asyncio_mode = "auto") and unittest.mock only.
 No live network calls are made; any HTTP call attempted in the flow raises an
 AssertionError via a sentinel patch so the test fails loudly if the production
-code ever regresses on the no-network constraint.
+code ever regresses on the no-network constraint. The static GTFS picker
+client is mocked at the class level (``StaticGtfsPickerClient``), matching
+the project's existing convention for ``GtfsRtClient``.
 """
 
 from __future__ import annotations
@@ -22,13 +26,21 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from homeassistant.data_entry_flow import AbortFlow, FlowResultType
-from nta_gtfs import GtfsRtAuthError, GtfsRtFetchError, GtfsRtParseError
+from nta_gtfs import (
+    GtfsRtAuthError,
+    GtfsRtFetchError,
+    GtfsRtParseError,
+    Route,
+    StaticGtfsLoadError,
+    Stop,
+)
 
 from custom_components.tfi_live.config_flow import (
     TfiLiveConfigFlow,
     TfiLiveOptionsFlowHandler,
 )
 from custom_components.tfi_live.const import (
+    ALL_ROUTES_SENTINEL,
     CONF_API_KEY,
     CONF_DIRECTION_ID,
     CONF_ROUTE_ID,
@@ -52,20 +64,33 @@ VALID_STEP1 = {
     ),
 }
 
-VALID_STEP2 = {
+_STOP = Stop(stop_id="STOP_A_ID", stop_code="STOP_A", stop_name="Main St")
+_ROUTE = Route(route_id="ROUTE_46A_ID", route_short_name="46A", agency_id="BE")
+
+VALID_STOP_INPUT = {CONF_STOP_ID: _STOP.stop_id}
+
+VALID_ROUTE_INPUT = {
     "name": "Next 46A",
-    CONF_STOP_ID: "STOP_A",
-    CONF_ROUTE_ID: "46A",
+    CONF_ROUTE_ID: _ROUTE.route_id,
     CONF_DIRECTION_ID: "",
     "operator_id": "",
 }
 
-_PREFILLED_CONFIG = {
-    CONF_API_KEY: "k",
-    CONF_TRIP_UPDATE_URL: "https://a.com",
-    CONF_STATIC_GTFS_URL: "https://b.com",
-    CONF_SENSORS: [],
-}
+
+def _prefilled_config() -> dict[str, Any]:
+    """Return a fresh staged-config dict with an empty sensor list.
+
+    A plain module-level dict would share its ``CONF_SENSORS`` list object
+    across every test that does ``_prefilled_config()`` (a shallow
+    copy), silently leaking appended sensors between tests.
+    """
+    return {
+        CONF_API_KEY: "k",
+        CONF_TRIP_UPDATE_URL: "https://a.com",
+        CONF_STATIC_GTFS_URL: "https://b.com",
+        CONF_SENSORS: [],
+    }
+
 
 # ---------------------------------------------------------------------------
 # Stub factories
@@ -146,6 +171,56 @@ def _stub_show_menu(flow: object) -> Callable[..., dict[str, Any]]:
     return _show_menu
 
 
+@contextmanager
+def _patch_picker_client(
+    stops: list[Stop] | None = None,
+    routes_for_stop: list[Route] | None = None,
+    all_routes: list[Route] | None = None,
+    load_side_effect: Exception | None = None,
+):  # type: ignore[no-untyped-def]
+    """Patch the config flow's ``StaticGtfsPickerClient`` with a mock.
+
+    Follows the project convention of mocking ``nta_gtfs`` clients at the
+    class level rather than mocking raw aiohttp sessions. Once a flow calls
+    a picker step inside this context, the mock is cached on the flow
+    instance (``self._picker_client``), so later calls to picker steps in
+    the same test don't need to be wrapped in a fresh patch.
+
+    Args:
+        stops: Return value for ``list_stops``; defaults to a single stop.
+        routes_for_stop: Return value for ``async_get_routes_for_stop``;
+            defaults to a single narrowed route.
+        all_routes: Return value for ``list_routes`` (the unnarrowed
+            fallback list); defaults to a single route.
+        load_side_effect: Exception raised by ``async_load``, or ``None``
+            for a successful load.
+
+    Yields:
+        The mock picker client instance the flow will use.
+    """
+    client = MagicMock()
+    client.async_load = AsyncMock(side_effect=load_side_effect)
+    client.list_stops = MagicMock(return_value=stops if stops is not None else [_STOP])
+    client.async_get_routes_for_stop = AsyncMock(
+        return_value=routes_for_stop if routes_for_stop is not None else [_ROUTE]
+    )
+    client.list_routes = MagicMock(
+        return_value=all_routes if all_routes is not None else [_ROUTE]
+    )
+    client.async_close = AsyncMock()
+    with (
+        patch(
+            "custom_components.tfi_live.config_flow.async_get_clientsession",
+            return_value=MagicMock(),
+        ),
+        patch(
+            "custom_components.tfi_live.config_flow.StaticGtfsPickerClient",
+            MagicMock(return_value=client),
+        ),
+    ):
+        yield client
+
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -158,6 +233,7 @@ def mock_hass() -> MagicMock:
     hass.config_entries = MagicMock()
     hass.config_entries.async_update_entry = MagicMock()
     hass.config_entries.async_reload = AsyncMock()
+    hass.async_create_task = MagicMock()
     return hass
 
 
@@ -296,15 +372,15 @@ def _patch_probe_client(side_effect: Exception | None = None):  # type: ignore[n
         yield client
 
 
-async def test_step1_valid_advances_to_sensor(flow: TfiLiveConfigFlow) -> None:
-    """Valid step 1 input advances to the sensor form (step_id='sensor')."""
-    # Arrange — mock the probe so no real HTTP call is made
-    with _patch_probe_client():
+async def test_step1_valid_advances_to_stop(flow: TfiLiveConfigFlow) -> None:
+    """Valid step 1 input advances to the stop-picker form (step_id='stop')."""
+    # Arrange — mock the probe and the picker client so no real HTTP call is made
+    with _patch_probe_client(), _patch_picker_client():
         result = await flow.async_step_user(VALID_STEP1)
 
-    # Assert — step 1 calls async_step_sensor(None) which shows the sensor form
+    # Assert — step 1 calls async_step_stop(None) which shows the stop form
     assert result["type"] == FlowResultType.FORM
-    assert result["step_id"] == "sensor"
+    assert result["step_id"] == "stop"
 
 
 async def test_step1_no_network_call(flow: TfiLiveConfigFlow) -> None:
@@ -384,122 +460,277 @@ async def test_step1_unparseable_feed_returns_cannot_parse(
 
 
 # ---------------------------------------------------------------------------
-# Step 2 — required field validation
+# Stop step — picker rendering and selection
 # ---------------------------------------------------------------------------
 
 
-async def test_step2_empty_name_returns_error(flow: TfiLiveConfigFlow) -> None:
-    """Step 2 with name='' returns FORM and errors['name']=='required'."""
-    # Arrange
-    flow._config = dict(_PREFILLED_CONFIG, **{CONF_SENSORS: []})
-    user_input = {**VALID_STEP2, "name": ""}
+async def test_stop_initial_render_returns_form(flow: TfiLiveConfigFlow) -> None:
+    """The stop step with no input renders the stop form with no errors."""
+    flow._config = _prefilled_config()
 
-    # Act
-    result = await flow.async_step_sensor(user_input)
+    with _patch_picker_client():
+        result = await flow.async_step_stop(None)
 
-    # Assert
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "stop"
+    assert result["errors"] == {}
+
+
+async def test_stop_selection_advances_to_route(flow: TfiLiveConfigFlow) -> None:
+    """Selecting a stop stores it and advances to the route step."""
+    flow._config = _prefilled_config()
+
+    with _patch_picker_client():
+        result = await flow.async_step_stop(VALID_STOP_INPUT)
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "route"
+    assert flow._pending_stop_id == _STOP.stop_id
+
+
+async def test_stop_load_failure_shows_error(flow: TfiLiveConfigFlow) -> None:
+    """A StaticGtfsLoadError while listing stops surfaces a form error.
+
+    No free-text fallback exists — the user must retry the picker.
+    """
+    flow._config = _prefilled_config()
+
+    with _patch_picker_client(load_side_effect=StaticGtfsLoadError("boom")):
+        result = await flow.async_step_stop(None)
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "stop"
+    assert result["errors"]["base"] == "cannot_load_static_gtfs"
+
+
+async def test_stop_picker_client_loaded_once_and_reused(
+    flow: TfiLiveConfigFlow,
+) -> None:
+    """The picker client is constructed and loaded once per flow run.
+
+    Two renders of the stop step (e.g. via 'add another') must not
+    re-download the static GTFS archive.
+    """
+    flow._config = _prefilled_config()
+
+    with (
+        patch(
+            "custom_components.tfi_live.config_flow.async_get_clientsession",
+            return_value=MagicMock(),
+        ),
+        patch(
+            "custom_components.tfi_live.config_flow.StaticGtfsPickerClient"
+        ) as mock_cls,
+    ):
+        client = MagicMock()
+        client.async_load = AsyncMock()
+        client.list_stops = MagicMock(return_value=[_STOP])
+        mock_cls.return_value = client
+
+        await flow.async_step_stop(None)
+        await flow.async_step_stop(None)
+
+    mock_cls.assert_called_once()
+    client.async_load.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
+# Route step — narrowing, fallback, and sensor submission
+# ---------------------------------------------------------------------------
+
+
+async def test_route_initial_render_narrows_to_stop(flow: TfiLiveConfigFlow) -> None:
+    """The route step lists only routes linked to the picked stop."""
+    flow._config = _prefilled_config()
+    flow._pending_stop_id = _STOP.stop_id
+
+    other_route = Route(route_id="OTHER_ID", route_short_name="99", agency_id="BE")
+    with _patch_picker_client(routes_for_stop=[_ROUTE]) as client:
+        result = await flow.async_step_route(None)
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "route"
+    assert result["errors"] == {}
+    client.async_get_routes_for_stop.assert_awaited_once_with(_STOP.stop_id)
+    # list_routes (the unnarrowed fallback) must not be consulted when the
+    # narrowed list is non-empty.
+    client.list_routes.assert_not_called()
+    del other_route
+
+
+async def test_route_falls_back_to_full_list_on_zero_matches(
+    flow: TfiLiveConfigFlow,
+) -> None:
+    """An empty narrowed route list falls back to the full agency-labelled list."""
+    flow._config = _prefilled_config()
+    flow._pending_stop_id = _STOP.stop_id
+
+    with _patch_picker_client(routes_for_stop=[], all_routes=[_ROUTE]) as client:
+        result = await flow.async_step_route(None)
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["errors"]["base"] == "route_list_not_narrowed"
+    client.list_routes.assert_called_once()
+
+
+async def test_route_load_failure_shows_error(flow: TfiLiveConfigFlow) -> None:
+    """A StaticGtfsLoadError while narrowing routes surfaces a form error."""
+    flow._config = _prefilled_config()
+    flow._pending_stop_id = _STOP.stop_id
+
+    with _patch_picker_client(load_side_effect=StaticGtfsLoadError("boom")):
+        result = await flow.async_step_route(None)
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["errors"]["base"] == "cannot_load_static_gtfs"
+
+
+async def test_route_selecting_all_routes_leaves_route_id_unset(
+    flow: TfiLiveConfigFlow,
+) -> None:
+    """Picking 'All routes at this stop' stores route_id=None (stop-wide)."""
+    flow._config = _prefilled_config()
+    flow._pending_stop_id = _STOP.stop_id
+
+    result = await flow.async_step_route(
+        {**VALID_ROUTE_INPUT, CONF_ROUTE_ID: ALL_ROUTES_SENTINEL}
+    )
+
+    assert result["type"] == FlowResultType.MENU
+    stored = flow._config[CONF_SENSORS][0]
+    assert stored[CONF_ROUTE_ID] is None
+    assert stored[CONF_STOP_ID] == _STOP.stop_id
+
+
+async def test_route_selecting_real_route_stores_route_id(
+    flow: TfiLiveConfigFlow,
+) -> None:
+    """Picking a real route stores its route_id and the picked stop_id."""
+    flow._config = _prefilled_config()
+    flow._pending_stop_id = _STOP.stop_id
+
+    result = await flow.async_step_route(VALID_ROUTE_INPUT)
+
+    assert result["type"] == FlowResultType.MENU
+    stored = flow._config[CONF_SENSORS][0]
+    assert stored[CONF_ROUTE_ID] == _ROUTE.route_id
+    assert stored[CONF_STOP_ID] == _STOP.stop_id
+    assert stored["name"] == "Next 46A"
+
+
+async def test_route_empty_name_returns_error(flow: TfiLiveConfigFlow) -> None:
+    """Route step with name='' returns FORM and errors['name']=='required'."""
+    flow._config = _prefilled_config()
+    flow._pending_stop_id = _STOP.stop_id
+
+    with _patch_picker_client():
+        result = await flow.async_step_route({**VALID_ROUTE_INPUT, "name": ""})
+
     assert result["type"] == FlowResultType.FORM
     assert result["errors"]["name"] == "required"
 
 
-async def test_step2_empty_stop_id_returns_error(flow: TfiLiveConfigFlow) -> None:
-    """Step 2 with stop_id='' returns FORM and errors['stop_id']=='required'."""
-    # Arrange
-    flow._config = dict(_PREFILLED_CONFIG, **{CONF_SENSORS: []})
-    user_input = {**VALID_STEP2, CONF_STOP_ID: ""}
-
-    # Act
-    result = await flow.async_step_sensor(user_input)
-
-    # Assert
-    assert result["type"] == FlowResultType.FORM
-    assert result["errors"][CONF_STOP_ID] == "required"
-
-
-async def test_step2_empty_route_id_returns_error(flow: TfiLiveConfigFlow) -> None:
-    """Empty route_id returns FORM with errors['route_id']=='required'."""
-    # Arrange
-    flow._config = dict(_PREFILLED_CONFIG, **{CONF_SENSORS: []})
-    user_input = {**VALID_STEP2, CONF_ROUTE_ID: ""}
-
-    # Act
-    result = await flow.async_step_sensor(user_input)
-
-    # Assert
-    assert result["type"] == FlowResultType.FORM
-    assert result["errors"][CONF_ROUTE_ID] == "required"
-
-
-# ---------------------------------------------------------------------------
-# Step 2 — direction_id validation
-# ---------------------------------------------------------------------------
-
-
-async def test_step2_direction_id_2_returns_error(flow: TfiLiveConfigFlow) -> None:
+async def test_route_direction_id_2_returns_error(flow: TfiLiveConfigFlow) -> None:
     """Direction_id='2' (out of range) returns invalid_direction error."""
-    # Arrange
-    flow._config = dict(_PREFILLED_CONFIG, **{CONF_SENSORS: []})
-    user_input = {**VALID_STEP2, CONF_DIRECTION_ID: "2"}
+    flow._config = _prefilled_config()
+    flow._pending_stop_id = _STOP.stop_id
 
-    # Act
-    result = await flow.async_step_sensor(user_input)
+    with _patch_picker_client():
+        result = await flow.async_step_route(
+            {**VALID_ROUTE_INPUT, CONF_DIRECTION_ID: "2"}
+        )
 
-    # Assert
     assert result["type"] == FlowResultType.FORM
     assert result["errors"][CONF_DIRECTION_ID] == "invalid_direction"
 
 
-async def test_step2_direction_id_non_integer_returns_error(
+async def test_route_direction_id_non_integer_returns_error(
     flow: TfiLiveConfigFlow,
 ) -> None:
     """Direction_id='abc' (non-integer) returns invalid_direction error."""
-    # Arrange
-    flow._config = dict(_PREFILLED_CONFIG, **{CONF_SENSORS: []})
-    user_input = {**VALID_STEP2, CONF_DIRECTION_ID: "abc"}
+    flow._config = _prefilled_config()
+    flow._pending_stop_id = _STOP.stop_id
 
-    # Act
-    result = await flow.async_step_sensor(user_input)
+    with _patch_picker_client():
+        result = await flow.async_step_route(
+            {**VALID_ROUTE_INPUT, CONF_DIRECTION_ID: "abc"}
+        )
 
-    # Assert
     assert result["type"] == FlowResultType.FORM
     assert result["errors"][CONF_DIRECTION_ID] == "invalid_direction"
 
 
-async def test_step2_direction_id_0_accepted(flow: TfiLiveConfigFlow) -> None:
+async def test_route_direction_id_0_accepted(flow: TfiLiveConfigFlow) -> None:
     """Direction_id='0' is a valid value — no direction_id error raised."""
-    # Arrange
-    flow._config = dict(_PREFILLED_CONFIG, **{CONF_SENSORS: []})
-    user_input = {**VALID_STEP2, CONF_DIRECTION_ID: "0"}
+    flow._config = _prefilled_config()
+    flow._pending_stop_id = _STOP.stop_id
 
-    # Act
-    result = await flow.async_step_sensor(user_input)
+    result = await flow.async_step_route({**VALID_ROUTE_INPUT, CONF_DIRECTION_ID: "0"})
 
-    # Assert — success path shows menu, not a form with errors
     assert result["type"] == FlowResultType.MENU
-    assert CONF_DIRECTION_ID not in result.get("errors", {})
+    assert flow._config[CONF_SENSORS][0][CONF_DIRECTION_ID] == 0
 
 
-async def test_step2_direction_id_1_accepted(flow: TfiLiveConfigFlow) -> None:
+async def test_route_direction_id_1_accepted(flow: TfiLiveConfigFlow) -> None:
     """Direction_id='1' is a valid value — no direction_id error raised."""
-    # Arrange
-    flow._config = dict(_PREFILLED_CONFIG, **{CONF_SENSORS: []})
-    user_input = {**VALID_STEP2, CONF_DIRECTION_ID: "1"}
+    flow._config = _prefilled_config()
+    flow._pending_stop_id = _STOP.stop_id
 
-    # Act
-    result = await flow.async_step_sensor(user_input)
+    result = await flow.async_step_route({**VALID_ROUTE_INPUT, CONF_DIRECTION_ID: "1"})
 
-    # Assert
     assert result["type"] == FlowResultType.MENU
-    assert CONF_DIRECTION_ID not in result.get("errors", {})
+    assert flow._config[CONF_SENSORS][0][CONF_DIRECTION_ID] == 1
+
+
+async def test_route_empty_direction_id_stored_as_none(
+    flow: TfiLiveConfigFlow,
+) -> None:
+    """Omitting direction_id stores None (not empty string) in the config."""
+    flow._config = _prefilled_config()
+    flow._pending_stop_id = _STOP.stop_id
+
+    await flow.async_step_route({**VALID_ROUTE_INPUT, CONF_DIRECTION_ID: ""})
+
+    assert flow._config[CONF_SENSORS][0][CONF_DIRECTION_ID] is None
+
+
+async def test_route_empty_operator_id_stored_as_none(
+    flow: TfiLiveConfigFlow,
+) -> None:
+    """Omitting operator_id stores None (not empty string) in the config."""
+    flow._config = _prefilled_config()
+    flow._pending_stop_id = _STOP.stop_id
+
+    await flow.async_step_route({**VALID_ROUTE_INPUT, "operator_id": ""})
+
+    assert flow._config[CONF_SENSORS][0]["operator_id"] is None
+
+
+async def test_route_no_network_call_on_submission(flow: TfiLiveConfigFlow) -> None:
+    """Route submission must not make any HTTP calls (client already cached)."""
+    flow._config = _prefilled_config()
+    flow._pending_stop_id = _STOP.stop_id
+    flow._picker_client = MagicMock()  # already loaded, as if stop step ran first
+
+    def _raise(*args: object, **kwargs: object) -> None:
+        raise AssertionError("HTTP call made during route submission")
+
+    with (
+        patch("aiohttp.ClientSession", side_effect=_raise),
+        patch("urllib.request.urlopen", side_effect=_raise),
+    ):
+        result = await flow.async_step_route(VALID_ROUTE_INPUT)
+
+    assert result["type"] == FlowResultType.MENU
 
 
 # ---------------------------------------------------------------------------
-# Step 2 — repeated sensor addition
+# Repeated sensor addition
 # ---------------------------------------------------------------------------
 
 
-async def test_step2_repeated_addition(flow: TfiLiveConfigFlow) -> None:
-    """Two sequential valid step 2 submissions produce two sensor entries."""
+async def test_repeated_addition(flow: TfiLiveConfigFlow) -> None:
+    """Two sequential valid stop/route submissions produce two sensor entries."""
     # Arrange
     flow._config = {
         CONF_API_KEY: "k",
@@ -509,18 +740,20 @@ async def test_step2_repeated_addition(flow: TfiLiveConfigFlow) -> None:
     }
 
     # Act — first sensor
-    result1 = await flow.async_step_sensor({**VALID_STEP2, "name": "First"})
+    flow._pending_stop_id = _STOP.stop_id
+    result1 = await flow.async_step_route({**VALID_ROUTE_INPUT, "name": "First"})
     assert result1["type"] == FlowResultType.MENU
 
     # Act — second sensor (simulates the user returning via async_step_add_another)
-    result2 = await flow.async_step_sensor({**VALID_STEP2, "name": "Second"})
+    flow._pending_stop_id = _STOP.stop_id
+    result2 = await flow.async_step_route({**VALID_ROUTE_INPUT, "name": "Second"})
     assert result2["type"] == FlowResultType.MENU
 
     # Assert — both sensors accumulated in staged config
     assert len(flow._config[CONF_SENSORS]) == 2
 
 
-async def test_step2_repeated_addition_sensor_names_preserved(
+async def test_repeated_addition_sensor_names_preserved(
     flow: TfiLiveConfigFlow,
 ) -> None:
     """Each sensor config entry records the name given at submission time."""
@@ -533,8 +766,10 @@ async def test_step2_repeated_addition_sensor_names_preserved(
     }
 
     # Act
-    await flow.async_step_sensor({**VALID_STEP2, "name": "Alpha"})
-    await flow.async_step_sensor({**VALID_STEP2, "name": "Beta"})
+    flow._pending_stop_id = _STOP.stop_id
+    await flow.async_step_route({**VALID_ROUTE_INPUT, "name": "Alpha"})
+    flow._pending_stop_id = _STOP.stop_id
+    await flow.async_step_route({**VALID_ROUTE_INPUT, "name": "Beta"})
 
     # Assert
     names = [s["name"] for s in flow._config[CONF_SENSORS]]
@@ -546,8 +781,8 @@ async def test_step2_repeated_addition_sensor_names_preserved(
 # ---------------------------------------------------------------------------
 
 
-async def test_step2_success_menu_step_is_real(flow: TfiLiveConfigFlow) -> None:
-    """Issue #78: valid sensor submission shows a menu backed by a real step.
+async def test_route_success_menu_step_is_real(flow: TfiLiveConfigFlow) -> None:
+    """Issue #78: valid route submission shows a menu backed by a real step.
 
     The v0.2.3 regression returned a menu with step_id='sensor_menu' but no
     async_step_sensor_menu method, so HA raised UnknownStep and the frontend
@@ -555,10 +790,11 @@ async def test_step2_success_menu_step_is_real(flow: TfiLiveConfigFlow) -> None:
     fails this test if the step method is ever removed again.
     """
     # Arrange
-    flow._config = dict(_PREFILLED_CONFIG, **{CONF_SENSORS: []})
+    flow._config = _prefilled_config()
+    flow._pending_stop_id = _STOP.stop_id
 
     # Act
-    result = await flow.async_step_sensor(dict(VALID_STEP2))
+    result = await flow.async_step_route(dict(VALID_ROUTE_INPUT))
 
     # Assert
     assert result["type"] == FlowResultType.MENU
@@ -577,23 +813,24 @@ async def test_sensor_menu_step_renders_menu(flow: TfiLiveConfigFlow) -> None:
     assert result["menu_options"] == ["add_another", "finish"]
 
 
-async def test_step2_add_another_loops_back_to_sensor_form(
+async def test_add_another_loops_back_to_stop_form(
     flow: TfiLiveConfigFlow,
 ) -> None:
-    """Async_step_add_another presents the sensor form (step_id='sensor')."""
+    """Async_step_add_another presents the stop form (step_id='stop')."""
     # Arrange
-    flow._config = dict(_PREFILLED_CONFIG, **{CONF_SENSORS: []})
+    flow._config = _prefilled_config()
 
     # Act
-    result = await flow.async_step_add_another()
+    with _patch_picker_client():
+        result = await flow.async_step_add_another()
 
-    # Assert — sensor form is re-shown with no errors
+    # Assert — stop form is re-shown with no errors
     assert result["type"] == FlowResultType.FORM
-    assert result["step_id"] == "sensor"
+    assert result["step_id"] == "stop"
     assert result["errors"] == {}
 
 
-async def test_step2_finish_creates_entry_with_all_sensors(
+async def test_finish_creates_entry_with_all_sensors(
     flow: TfiLiveConfigFlow,
 ) -> None:
     """Async_step_finish creates a config entry whose data contains sensors."""
@@ -617,21 +854,21 @@ async def test_step2_finish_creates_entry_with_all_sensors(
     assert len(result["data"][CONF_SENSORS]) == 2
 
 
-async def test_step2_no_network_call(flow: TfiLiveConfigFlow) -> None:
-    """Step 2 must not make any HTTP calls during validation."""
-    # Arrange
-    flow._config = dict(_PREFILLED_CONFIG, **{CONF_SENSORS: []})
+async def test_finish_closes_picker_client(flow: TfiLiveConfigFlow) -> None:
+    """Async_remove closes the session-scoped picker client after the flow ends.
 
-    def _raise(*args: object, **kwargs: object) -> None:
-        raise AssertionError("HTTP call made during config flow step 2")
+    HA calls async_remove once the flow leaves the in-progress list, which
+    happens after async_step_finish returns CREATE_ENTRY.
+    """
+    flow._config = _prefilled_config()
+    mock_client = MagicMock()
+    mock_client.async_close = AsyncMock()
+    flow._picker_client = mock_client
 
-    with (
-        patch("aiohttp.ClientSession", side_effect=_raise),
-        patch("urllib.request.urlopen", side_effect=_raise),
-    ):
-        result = await flow.async_step_sensor(VALID_STEP2)
+    flow.async_remove()
 
-    assert result["type"] in (FlowResultType.FORM, FlowResultType.MENU)
+    flow.hass.async_create_task.assert_called_once()
+    assert flow._picker_client is None
 
 
 # ---------------------------------------------------------------------------
@@ -800,87 +1037,6 @@ async def test_step1_initial_render_schema_has_defaults(
 
 
 # ---------------------------------------------------------------------------
-# Step 2 — initial render (no user_input)
-# ---------------------------------------------------------------------------
-
-
-async def test_step2_initial_render_returns_form(flow: TfiLiveConfigFlow) -> None:
-    """Step 2 called with no input renders the sensor form with no errors."""
-    # Arrange
-    flow._config = dict(_PREFILLED_CONFIG, **{CONF_SENSORS: []})
-
-    # Act
-    result = await flow.async_step_sensor(None)
-
-    # Assert
-    assert result["type"] == FlowResultType.FORM
-    assert result["step_id"] == "sensor"
-    assert result["errors"] == {}
-
-
-# ---------------------------------------------------------------------------
-# Step 2 — successful submission stores correct sensor data
-# ---------------------------------------------------------------------------
-
-
-async def test_step2_valid_submission_stores_sensor_config(
-    flow: TfiLiveConfigFlow,
-) -> None:
-    """A valid step 2 submission appends the correct dict to _config."""
-    # Arrange
-    flow._config = dict(_PREFILLED_CONFIG, **{CONF_SENSORS: []})
-    user_input = {
-        "name": "My Bus",
-        CONF_STOP_ID: "8220DB002081",
-        CONF_ROUTE_ID: "46A",
-        CONF_DIRECTION_ID: "1",
-        "operator_id": "BE",
-    }
-
-    # Act
-    result = await flow.async_step_sensor(user_input)
-
-    # Assert — menu offered after success
-    assert result["type"] == FlowResultType.MENU
-    stored = flow._config[CONF_SENSORS][0]
-    assert stored["name"] == "My Bus"
-    assert stored[CONF_STOP_ID] == "8220DB002081"
-    assert stored[CONF_ROUTE_ID] == "46A"
-    assert stored[CONF_DIRECTION_ID] == 1  # stored as int
-    assert stored["operator_id"] == "BE"
-
-
-async def test_step2_empty_direction_id_stored_as_none(
-    flow: TfiLiveConfigFlow,
-) -> None:
-    """Omitting direction_id stores None (not empty string) in the config."""
-    # Arrange
-    flow._config = dict(_PREFILLED_CONFIG, **{CONF_SENSORS: []})
-    user_input = {**VALID_STEP2, CONF_DIRECTION_ID: ""}
-
-    # Act
-    await flow.async_step_sensor(user_input)
-
-    # Assert
-    assert flow._config[CONF_SENSORS][0][CONF_DIRECTION_ID] is None
-
-
-async def test_step2_empty_operator_id_stored_as_none(
-    flow: TfiLiveConfigFlow,
-) -> None:
-    """Omitting operator_id stores None (not empty string) in the config."""
-    # Arrange
-    flow._config = dict(_PREFILLED_CONFIG, **{CONF_SENSORS: []})
-    user_input = {**VALID_STEP2, "operator_id": ""}
-
-    # Act
-    await flow.async_step_sensor(user_input)
-
-    # Assert
-    assert flow._config[CONF_SENSORS][0]["operator_id"] is None
-
-
-# ---------------------------------------------------------------------------
 # Step 1 — both URL errors reported independently
 # ---------------------------------------------------------------------------
 
@@ -1041,180 +1197,6 @@ async def test_reconfigure_initial_render_prefills_entry_data(
             assert key.default() == mock_entry.data[CONF_TRIP_UPDATE_URL]
 
 
-# ---------------------------------------------------------------------------
-# Issue #34 — options flow
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture
-def options_flow(mock_hass: MagicMock) -> TfiLiveOptionsFlowHandler:
-    """Return a TfiLiveOptionsFlowHandler wired up with stub base-class methods.
-
-    Args:
-        mock_hass: A mock hass instance.
-
-    Returns:
-        A :class:`TfiLiveOptionsFlowHandler` with stubbed HA base-class methods
-        and a mock ``config_entry`` containing an empty sensor list.
-    """
-    existing_data = {
-        CONF_API_KEY: "k",
-        CONF_TRIP_UPDATE_URL: "https://a.com",
-        CONF_STATIC_GTFS_URL: "https://b.com",
-        CONF_SENSORS: [],
-    }
-    mock_entry = MagicMock()
-    mock_entry.data = existing_data
-    mock_entry.domain = "tfi_live"
-
-    # config_entry is a read-only property on OptionsFlow that calls
-    # hass.config_entries.async_get_known_entry(handler).  Wire up the mock
-    # so that call returns our mock entry.
-    mock_hass.config_entries.async_get_known_entry = MagicMock(return_value=mock_entry)
-
-    handler = TfiLiveOptionsFlowHandler()
-    handler.hass = mock_hass
-    # handler is the "entry_id" used by the property
-    handler.handler = mock_entry.entry_id  # type: ignore[assignment]
-
-    handler.async_show_form = _stub_show_form(handler)  # type: ignore[method-assign]
-    handler.async_show_menu = _stub_show_menu(handler)  # type: ignore[method-assign]
-    handler.async_create_entry = lambda title, data: {  # type: ignore[method-assign]
-        "type": FlowResultType.CREATE_ENTRY,
-        "title": title,
-        "data": data,
-    }
-
-    return handler
-
-
-async def test_options_flow_init_shows_sensor_form(
-    options_flow: TfiLiveOptionsFlowHandler,
-) -> None:
-    """Issue #34: options flow init delegates to the sensor form."""
-    result = await options_flow.async_step_init()
-
-    assert result["type"] == FlowResultType.FORM
-    assert result["step_id"] == "sensor"
-
-
-async def test_options_flow_adding_sensor_appends_to_entry_data(
-    options_flow: TfiLiveOptionsFlowHandler,
-    mock_hass: MagicMock,
-) -> None:
-    """Issue #34: adding a sensor via options flow appends it to entry data."""
-    # Pre-populate an existing sensor in the mock entry returned by config_entry
-    existing_data_with_sensor = {
-        CONF_API_KEY: "k",
-        CONF_TRIP_UPDATE_URL: "https://a.com",
-        CONF_STATIC_GTFS_URL: "https://b.com",
-        CONF_SENSORS: [{"name": "Existing", CONF_STOP_ID: "S1", CONF_ROUTE_ID: "R1"}],
-    }
-    mock_hass.config_entries.async_get_known_entry.return_value.data = (
-        existing_data_with_sensor
-    )
-
-    # Submit a valid new sensor
-    await options_flow.async_step_sensor({**VALID_STEP2, "name": "New Sensor"})
-
-    # Finish the options flow
-    result = await options_flow.async_step_finish()
-
-    assert result["type"] == FlowResultType.CREATE_ENTRY
-    sensors = result["data"][CONF_SENSORS]
-    assert len(sensors) == 2
-    assert sensors[0]["name"] == "Existing"
-    assert sensors[1]["name"] == "New Sensor"
-
-
-async def test_options_flow_sensor_validation_errors(
-    options_flow: TfiLiveOptionsFlowHandler,
-) -> None:
-    """Issue #34: options flow sensor form validates required fields."""
-    result = await options_flow.async_step_sensor(
-        {
-            "name": "",
-            CONF_STOP_ID: "",
-            CONF_ROUTE_ID: "",
-            CONF_DIRECTION_ID: "",
-            "operator_id": "",
-        }
-    )
-
-    assert result["type"] == FlowResultType.FORM
-    assert result["errors"].get("name") == "required"
-    assert result["errors"].get(CONF_STOP_ID) == "required"
-    assert result["errors"].get(CONF_ROUTE_ID) == "required"
-
-
-async def test_options_flow_add_another_loops(
-    options_flow: TfiLiveOptionsFlowHandler,
-) -> None:
-    """Issue #34: options flow add_another returns to the sensor form."""
-    result = await options_flow.async_step_add_another()
-
-    assert result["type"] == FlowResultType.FORM
-    assert result["step_id"] == "sensor"
-
-
-async def test_options_flow_success_menu_step_is_real(
-    options_flow: TfiLiveOptionsFlowHandler,
-) -> None:
-    """Issue #78: options flow sensor success shows a menu backed by a real step."""
-    result = await options_flow.async_step_sensor(dict(VALID_STEP2))
-
-    assert result["type"] == FlowResultType.MENU
-    assert result["step_id"] == "sensor_menu"
-    assert result["menu_options"] == ["add_another", "finish"]
-
-
-async def test_options_flow_sensor_menu_step_renders_menu(
-    options_flow: TfiLiveOptionsFlowHandler,
-) -> None:
-    """Issue #78: options flow async_step_sensor_menu renders the post-add menu."""
-    result = await options_flow.async_step_sensor_menu()
-
-    assert result["type"] == FlowResultType.MENU
-    assert result["step_id"] == "sensor_menu"
-    assert result["menu_options"] == ["add_another", "finish"]
-
-
-async def test_options_flow_direction_id_invalid(
-    options_flow: TfiLiveOptionsFlowHandler,
-) -> None:
-    """Issue #34: options flow direction_id='2' returns invalid_direction error."""
-    result = await options_flow.async_step_sensor(
-        {
-            "name": "Bus",
-            CONF_STOP_ID: "S1",
-            CONF_ROUTE_ID: "46A",
-            CONF_DIRECTION_ID: "2",
-            "operator_id": "",
-        }
-    )
-
-    assert result["type"] == FlowResultType.FORM
-    assert result["errors"].get(CONF_DIRECTION_ID) == "invalid_direction"
-
-
-async def test_options_flow_direction_id_non_integer(
-    options_flow: TfiLiveOptionsFlowHandler,
-) -> None:
-    """Issue #34: options flow direction_id='abc' returns invalid_direction error."""
-    result = await options_flow.async_step_sensor(
-        {
-            "name": "Bus",
-            CONF_STOP_ID: "S1",
-            CONF_ROUTE_ID: "46A",
-            CONF_DIRECTION_ID: "abc",
-            "operator_id": "",
-        }
-    )
-
-    assert result["type"] == FlowResultType.FORM
-    assert result["errors"].get(CONF_DIRECTION_ID) == "invalid_direction"
-
-
 async def test_reconfigure_empty_api_key_returns_error(mock_hass: MagicMock) -> None:
     """Issue #34: reconfigure with empty api_key re-shows form with required error."""
     flow, _ = _make_flow_with_reconfigure_entry(mock_hass)
@@ -1271,3 +1253,209 @@ def test_async_get_options_flow_returns_handler() -> None:
     handler = TfiLiveConfigFlow.async_get_options_flow(mock_entry)
 
     assert isinstance(handler, TfiLiveOptionsFlowHandler)
+
+
+# ---------------------------------------------------------------------------
+# Issue #34 / #109 — options flow
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def options_flow(mock_hass: MagicMock) -> TfiLiveOptionsFlowHandler:
+    """Return a TfiLiveOptionsFlowHandler wired up with stub base-class methods.
+
+    Args:
+        mock_hass: A mock hass instance.
+
+    Returns:
+        A :class:`TfiLiveOptionsFlowHandler` with stubbed HA base-class methods
+        and a mock ``config_entry`` containing an empty sensor list.
+    """
+    existing_data = {
+        CONF_API_KEY: "k",
+        CONF_TRIP_UPDATE_URL: "https://a.com",
+        CONF_STATIC_GTFS_URL: "https://b.com",
+        CONF_SENSORS: [],
+    }
+    mock_entry = MagicMock()
+    mock_entry.data = existing_data
+    mock_entry.domain = "tfi_live"
+
+    # config_entry is a read-only property on OptionsFlow that calls
+    # hass.config_entries.async_get_known_entry(handler).  Wire up the mock
+    # so that call returns our mock entry.
+    mock_hass.config_entries.async_get_known_entry = MagicMock(return_value=mock_entry)
+
+    handler = TfiLiveOptionsFlowHandler()
+    handler.hass = mock_hass
+    # handler is the "entry_id" used by the property
+    handler.handler = mock_entry.entry_id  # type: ignore[assignment]
+
+    handler.async_show_form = _stub_show_form(handler)  # type: ignore[method-assign]
+    handler.async_show_menu = _stub_show_menu(handler)  # type: ignore[method-assign]
+    handler.async_create_entry = lambda title, data: {  # type: ignore[method-assign]
+        "type": FlowResultType.CREATE_ENTRY,
+        "title": title,
+        "data": data,
+    }
+
+    return handler
+
+
+async def test_options_flow_init_shows_stop_form(
+    options_flow: TfiLiveOptionsFlowHandler,
+) -> None:
+    """Issue #34/#109: options flow init delegates to the stop-picker form."""
+    with _patch_picker_client():
+        result = await options_flow.async_step_init()
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "stop"
+
+
+async def test_options_flow_adding_sensor_appends_to_entry_data(
+    options_flow: TfiLiveOptionsFlowHandler,
+    mock_hass: MagicMock,
+) -> None:
+    """Issue #34: adding a sensor via options flow appends it to entry data."""
+    # Pre-populate an existing sensor in the mock entry returned by config_entry
+    existing_data_with_sensor = {
+        CONF_API_KEY: "k",
+        CONF_TRIP_UPDATE_URL: "https://a.com",
+        CONF_STATIC_GTFS_URL: "https://b.com",
+        CONF_SENSORS: [{"name": "Existing", CONF_STOP_ID: "S1", CONF_ROUTE_ID: "R1"}],
+    }
+    mock_hass.config_entries.async_get_known_entry.return_value.data = (
+        existing_data_with_sensor
+    )
+
+    # Submit a valid new sensor via the two-step picker
+    options_flow._pending_stop_id = _STOP.stop_id
+    await options_flow.async_step_route({**VALID_ROUTE_INPUT, "name": "New Sensor"})
+
+    # Finish the options flow
+    result = await options_flow.async_step_finish()
+
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    sensors = result["data"][CONF_SENSORS]
+    assert len(sensors) == 2
+    assert sensors[0]["name"] == "Existing"
+    assert sensors[1]["name"] == "New Sensor"
+
+
+async def test_options_flow_route_validation_errors(
+    options_flow: TfiLiveOptionsFlowHandler,
+) -> None:
+    """Issue #34/#109: options flow route form validates required fields."""
+    options_flow._pending_stop_id = _STOP.stop_id
+    with _patch_picker_client():
+        result = await options_flow.async_step_route(
+            {
+                "name": "",
+                CONF_ROUTE_ID: _ROUTE.route_id,
+                CONF_DIRECTION_ID: "",
+                "operator_id": "",
+            }
+        )
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["errors"].get("name") == "required"
+
+
+async def test_options_flow_add_another_loops(
+    options_flow: TfiLiveOptionsFlowHandler,
+) -> None:
+    """Issue #34: options flow add_another returns to the stop form."""
+    with _patch_picker_client():
+        result = await options_flow.async_step_add_another()
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "stop"
+
+
+async def test_options_flow_success_menu_step_is_real(
+    options_flow: TfiLiveOptionsFlowHandler,
+) -> None:
+    """Issue #78: options flow route success shows a menu backed by a real step."""
+    options_flow._pending_stop_id = _STOP.stop_id
+    result = await options_flow.async_step_route(dict(VALID_ROUTE_INPUT))
+
+    assert result["type"] == FlowResultType.MENU
+    assert result["step_id"] == "sensor_menu"
+    assert result["menu_options"] == ["add_another", "finish"]
+
+
+async def test_options_flow_sensor_menu_step_renders_menu(
+    options_flow: TfiLiveOptionsFlowHandler,
+) -> None:
+    """Issue #78: options flow async_step_sensor_menu renders the post-add menu."""
+    result = await options_flow.async_step_sensor_menu()
+
+    assert result["type"] == FlowResultType.MENU
+    assert result["step_id"] == "sensor_menu"
+    assert result["menu_options"] == ["add_another", "finish"]
+
+
+async def test_options_flow_direction_id_invalid(
+    options_flow: TfiLiveOptionsFlowHandler,
+) -> None:
+    """Issue #34: options flow direction_id='2' returns invalid_direction error."""
+    options_flow._pending_stop_id = _STOP.stop_id
+    with _patch_picker_client():
+        result = await options_flow.async_step_route(
+            {
+                "name": "Bus",
+                CONF_ROUTE_ID: _ROUTE.route_id,
+                CONF_DIRECTION_ID: "2",
+                "operator_id": "",
+            }
+        )
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["errors"].get(CONF_DIRECTION_ID) == "invalid_direction"
+
+
+async def test_options_flow_direction_id_non_integer(
+    options_flow: TfiLiveOptionsFlowHandler,
+) -> None:
+    """Issue #34: options flow direction_id='abc' returns invalid_direction error."""
+    options_flow._pending_stop_id = _STOP.stop_id
+    with _patch_picker_client():
+        result = await options_flow.async_step_route(
+            {
+                "name": "Bus",
+                CONF_ROUTE_ID: _ROUTE.route_id,
+                CONF_DIRECTION_ID: "abc",
+                "operator_id": "",
+            }
+        )
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["errors"].get(CONF_DIRECTION_ID) == "invalid_direction"
+
+
+async def test_options_flow_uses_entry_static_gtfs_url(
+    options_flow: TfiLiveOptionsFlowHandler,
+) -> None:
+    """Issue #109: the options flow builds its picker client from entry data.
+
+    The options flow has no step 1 of its own — the static GTFS URL must
+    come from the existing config entry rather than any staged flow state.
+    """
+    with (
+        patch(
+            "custom_components.tfi_live.config_flow.async_get_clientsession",
+            return_value=MagicMock(),
+        ),
+        patch(
+            "custom_components.tfi_live.config_flow.StaticGtfsPickerClient"
+        ) as mock_cls,
+    ):
+        client = MagicMock()
+        client.async_load = AsyncMock()
+        client.list_stops = MagicMock(return_value=[_STOP])
+        mock_cls.return_value = client
+
+        await options_flow.async_step_stop(None)
+
+    mock_cls.assert_called_once_with("https://b.com", mock_cls.call_args[0][1])

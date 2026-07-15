@@ -18,6 +18,7 @@ from custom_components.tfi_live.const import (
     ATTR_DEPARTURES,
     ATTR_DIRECTION_ID,
     ATTR_LAST_UPDATED,
+    ATTR_NEXT_DEPARTURE_ROUTE_NAME,
     ATTR_OPERATOR_ID,
     ATTR_ROUTE_ID,
     ATTR_STOP_ID,
@@ -828,6 +829,124 @@ def test_get_departures_static_only_trip_skipped_if_already_in_rt(
     # Should only have 1 departure, not 2
     assert len(deps) == 1
     assert deps[0]["realtime_time"] is not None
+
+
+# ---------------------------------------------------------------------------
+# Issue #109 — stop-wide monitoring (route_id=None)
+# ---------------------------------------------------------------------------
+
+
+def test_get_departures_route_id_none_merges_across_routes(mock_coordinator):
+    """A sensor with route_id=None merges RT departures across every route.
+
+    Regression guard: a route-filtered sensor's RT filter (entity["route_id"]
+    != self._route_id) must be skipped entirely when route_id is None,
+    rather than comparing against None and matching nothing.
+    """
+    entity_46a = make_rt_entity("TRIP_46A", route_id="46A", minutes_from_now=5.0)
+    entity_39a = make_rt_entity("TRIP_39A", route_id="39A", minutes_from_now=3.0)
+    mock_coordinator.data = {"entities": [entity_46a, entity_39a]}
+
+    stop_wide_config = {
+        "name": "Any bus",
+        "stop_id": "STOP_A",
+        "route_id": None,
+        "direction_id": None,
+        "operator_id": None,
+    }
+    s = TfiLiveSensor(mock_coordinator, stop_wide_config, "e1")
+    deps = s._get_departures()
+
+    # Both routes' departures are present, sorted ascending by effective time.
+    assert len(deps) == 2
+    assert deps[0][DEP_TRIP_ID] == "TRIP_39A"
+    assert deps[1][DEP_TRIP_ID] == "TRIP_46A"
+
+
+def test_get_departures_route_id_none_calls_static_cache_with_none(
+    mock_coordinator, sensor_config
+):
+    """A stop-wide sensor passes route_id=None through to the static cache."""
+    stop_wide_config = {**sensor_config, "route_id": None}
+    s = TfiLiveSensor(mock_coordinator, stop_wide_config, "e1")
+    s._get_departures()
+
+    call_args = mock_coordinator._cache.get_scheduled_departures.call_args
+    assert call_args.args[1] is None
+
+
+def test_route_filtered_sensor_unaffected_by_route_id_none_branch(
+    mock_coordinator, sensor_config
+):
+    """A route-filtered sensor still excludes other routes (regression guard)."""
+    entity_46a = make_rt_entity("TRIP_46A", route_id="46A", minutes_from_now=5.0)
+    entity_39a = make_rt_entity("TRIP_39A", route_id="39A", minutes_from_now=3.0)
+    mock_coordinator.data = {"entities": [entity_46a, entity_39a]}
+
+    s = TfiLiveSensor(mock_coordinator, sensor_config, "e1")  # route_id="46A"
+    deps = s._get_departures()
+
+    assert len(deps) == 1
+    assert deps[0][DEP_TRIP_ID] == "TRIP_46A"
+
+
+def test_next_departure_route_name_matches_first_departure(
+    mock_coordinator, sensor_config
+):
+    """next_departure_route_name mirrors departures[0]'s route_name."""
+    future = _now_dublin() + timedelta(minutes=10)
+    mock_coordinator._cache.get_scheduled_departures.return_value = [
+        ("TRIP_A", future.strftime("%H:%M"), "46A Route Name")
+    ]
+    s = TfiLiveSensor(mock_coordinator, sensor_config, "e1")
+    attrs = s.extra_state_attributes
+
+    assert (
+        attrs[ATTR_NEXT_DEPARTURE_ROUTE_NAME]
+        == attrs[ATTR_DEPARTURES][0][DEP_ROUTE_NAME]
+    )
+    assert attrs[ATTR_NEXT_DEPARTURE_ROUTE_NAME] == "46A Route Name"
+
+
+def test_next_departure_route_name_none_when_no_departures(
+    mock_coordinator, sensor_config
+):
+    """next_departure_route_name is None when there are no departures."""
+    mock_coordinator._cache.get_scheduled_departures.return_value = []
+    s = TfiLiveSensor(mock_coordinator, sensor_config, "e1")
+    attrs = s.extra_state_attributes
+
+    assert attrs[ATTR_DEPARTURES] == []
+    assert attrs[ATTR_NEXT_DEPARTURE_ROUTE_NAME] is None
+
+
+def test_next_departure_route_name_none_when_unavailable(
+    mock_coordinator, sensor_config
+):
+    """next_departure_route_name is None when the sensor is unavailable."""
+    mock_coordinator.last_update_success = False
+    s = TfiLiveSensor(mock_coordinator, sensor_config, "e1")
+    attrs = s.extra_state_attributes
+
+    assert attrs[ATTR_NEXT_DEPARTURE_ROUTE_NAME] is None
+
+
+def test_unique_id_stop_wide_stable_and_distinct(mock_coordinator):
+    """A stop-wide sensor (route_id=None) gets a stable, distinct unique_id."""
+    stop_wide_config = {
+        "name": "Any bus",
+        "stop_id": "STOP_A",
+        "route_id": None,
+        "direction_id": None,
+        "operator_id": None,
+    }
+    filtered_config = {**stop_wide_config, "route_id": "46A"}
+
+    stop_wide = TfiLiveSensor(mock_coordinator, stop_wide_config, "entry_1")
+    filtered = TfiLiveSensor(mock_coordinator, filtered_config, "entry_1")
+
+    assert stop_wide.unique_id == stop_wide.unique_id
+    assert stop_wide.unique_id != filtered.unique_id
 
 
 # ---------------------------------------------------------------------------

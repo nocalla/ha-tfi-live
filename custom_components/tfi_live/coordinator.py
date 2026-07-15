@@ -220,15 +220,25 @@ class TfiLiveCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         directly, since it never reaches the per-pair loop below. Does
         nothing until the cache has completed its first successful load, to
         avoid flagging every configured pair as unmatched before there is
-        any schedule data to check against.
+        any schedule data to check against. Stop-wide sensors (``route_id``
+        unset) are skipped entirely — ``has_scheduled_pair`` requires a real
+        route_id, and there's no equivalent misconfiguration to detect for
+        a sensor that merges every route already known to serve the stop.
         """
         if not self._cache.available:
             return
 
         pairs: dict[tuple[str, str], list[str]] = {}
         for sensor_config in self._config_entry.data.get(CONF_SENSORS, []):
+            route_id: str | None = sensor_config[CONF_ROUTE_ID]
+            if route_id is None:
+                # Stop-wide sensors have no single route to check for a
+                # scheduled pair against; has_scheduled_pair requires a real
+                # route_id, and there's no equivalent misconfiguration to
+                # detect here since the stop-wide "route" always matches
+                # whatever the stop actually serves.
+                continue
             stop_id: str = sensor_config[CONF_STOP_ID]
-            route_id: str = sensor_config[CONF_ROUTE_ID]
             pairs.setdefault((stop_id, route_id), []).append(sensor_config["name"])
 
         entry_id = self._config_entry.entry_id

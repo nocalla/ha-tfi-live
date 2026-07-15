@@ -39,12 +39,19 @@ ATTR_OPERATOR_ID: Final[str] = "operator_id"
 ATTR_DEPARTURES: Final[str] = "departures"
 ATTR_LAST_UPDATED: Final[str] = "last_updated"
 
+# Sensor extra_state_attributes keys (continued)
+ATTR_NEXT_DEPARTURE_ROUTE_NAME: Final[str] = "next_departure_route_name"
+
 # Departure dict keys — each entry in the departures attribute list
 DEP_SCHEDULED_TIME: Final[str] = "scheduled_time"
 DEP_REALTIME_TIME: Final[str] = "realtime_time"
 DEP_DELAY_MINUTES: Final[str] = "delay_minutes"
 DEP_TRIP_ID: Final[str] = "trip_id"
 DEP_ROUTE_NAME: Final[str] = "route_name"
+
+# Sentinel value for the route-picker's "All routes at this stop" option.
+# Chosen to be distinguishable from any real GTFS route_id.
+ALL_ROUTES_SENTINEL: Final[str] = "__all_routes__"
 
 # Numeric tunables
 UPDATE_INTERVAL_SECONDS: Final[int] = 60

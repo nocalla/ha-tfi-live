@@ -9,12 +9,19 @@
           "static_gtfs_url": "Static GTFS Feed URL"
         }
       },
-      "sensor": {
-        "title": "Add a Sensor",
+      "stop": {
+        "title": "Choose a Stop",
+        "description": "Search for the stop by the code printed on the pole or by name.",
         "data": {
+          "stop_id": "Stop"
+        }
+      },
+      "route": {
+        "title": "Choose a Route",
+        "description": "Pick a route serving this stop, or 'All routes at this stop' to monitor every departure.",
+        "data": {
+          "route_id": "Route",
           "name": "Sensor Name",
-          "stop_id": "Stop ID",
-          "route_id": "Route ID",
           "direction_id": "Direction (0 or 1, leave blank for both)",
           "operator_id": "Operator ID (optional)"
         }
@@ -48,7 +55,9 @@
       "invalid_direction": "Direction must be 0 or 1.",
       "cannot_connect": "Unable to connect to the NTA feed.",
       "cannot_parse": "The feed responded but is not a GTFS-RT protobuf feed — remove any format=json parameter from the URL.",
-      "invalid_auth": "Invalid API key — authentication failed."
+      "invalid_auth": "Invalid API key — authentication failed.",
+      "cannot_load_static_gtfs": "Couldn't reach the static GTFS feed to load stops and routes — try again shortly.",
+      "route_list_not_narrowed": "No routes found linked to this stop in the schedule — showing the full nationwide route list with operator shown instead."
     },
     "abort": {
       "reauth_successful": "Re-authentication was successful.",
@@ -58,12 +67,19 @@
   },
   "options": {
     "step": {
-      "sensor": {
-        "title": "Add a Sensor",
+      "stop": {
+        "title": "Choose a Stop",
+        "description": "Search for the stop by the code printed on the pole or by name.",
         "data": {
+          "stop_id": "Stop"
+        }
+      },
+      "route": {
+        "title": "Choose a Route",
+        "description": "Pick a route serving this stop, or 'All routes at this stop' to monitor every departure.",
+        "data": {
+          "route_id": "Route",
           "name": "Sensor Name",
-          "stop_id": "Stop ID",
-          "route_id": "Route ID",
           "direction_id": "Direction (0 or 1, leave blank for both)",
           "operator_id": "Operator ID (optional)"
         }
@@ -79,7 +95,9 @@
     },
     "error": {
       "required": "This field is required.",
-      "invalid_direction": "Direction must be 0 or 1."
+      "invalid_direction": "Direction must be 0 or 1.",
+      "cannot_load_static_gtfs": "Couldn't reach the static GTFS feed to load stops and routes — try again shortly.",
+      "route_list_not_narrowed": "No routes found linked to this stop in the schedule — showing the full nationwide route list with operator shown instead."
     }
   },
   "issues": {

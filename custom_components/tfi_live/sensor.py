@@ -17,6 +17,7 @@ from .const import (
     ATTR_DEPARTURES,
     ATTR_DIRECTION_ID,
     ATTR_LAST_UPDATED,
+    ATTR_NEXT_DEPARTURE_ROUTE_NAME,
     ATTR_OPERATOR_ID,
     ATTR_ROUTE_ID,
     ATTR_STOP_ID,
@@ -81,6 +82,11 @@ class TfiLiveSensor(CoordinatorEntity[TfiLiveCoordinator], SensorEntity):
     from real-time GTFS-RT data enriched with scheduled times from the static
     GTFS cache.  When unavailable or when no service is found, state is
     ``None``.
+
+    When ``route_id`` is unset (stop-wide monitoring), departures are merged
+    and sorted across every route serving the stop, and
+    ``next_departure_route_name`` identifies which route the reported
+    departure belongs to.
     """
 
     _attr_state_class = SensorStateClass.MEASUREMENT
@@ -107,7 +113,7 @@ class TfiLiveSensor(CoordinatorEntity[TfiLiveCoordinator], SensorEntity):
         """
         super().__init__(coordinator)
         self._stop_id: str = sensor_config["stop_id"]
-        self._route_id: str = sensor_config["route_id"]
+        self._route_id: str | None = sensor_config.get("route_id")
         self._direction_id: int | None = sensor_config.get("direction_id")
         self._operator_id: str | None = sensor_config.get("operator_id")
         self._name: str = sensor_config["name"]
@@ -207,6 +213,7 @@ class TfiLiveSensor(CoordinatorEntity[TfiLiveCoordinator], SensorEntity):
                 ATTR_OPERATOR_ID: None,
                 ATTR_DEPARTURES: None,
                 ATTR_LAST_UPDATED: None,
+                ATTR_NEXT_DEPARTURE_ROUTE_NAME: None,
             }
 
         departures = self._get_departures()
@@ -231,6 +238,9 @@ class TfiLiveSensor(CoordinatorEntity[TfiLiveCoordinator], SensorEntity):
                 last_fetch.isoformat()
                 if (last_fetch := self.coordinator.last_successful_fetch) is not None
                 else None
+            ),
+            ATTR_NEXT_DEPARTURE_ROUTE_NAME: (
+                departures[0][DEP_ROUTE_NAME] if departures else None
             ),
         }
 
@@ -268,7 +278,7 @@ class TfiLiveSensor(CoordinatorEntity[TfiLiveCoordinator], SensorEntity):
 
         rt_by_trip: dict[str, dict[str, Any]] = {}
         for entity in entities:
-            if entity["route_id"] != self._route_id:
+            if self._route_id is not None and entity["route_id"] != self._route_id:
                 continue
             if (
                 direction_filter is not None
