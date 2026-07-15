@@ -4,7 +4,7 @@
 [![Release](https://img.shields.io/badge/release-v0.3.1-blue)](https://github.com/nocalla/ha-tfi-live/releases)
 [![License](https://img.shields.io/badge/license-MIT-green)](https://github.com/nocalla/ha-tfi-live/blob/main/LICENSE)
 [![Coverage](https://img.shields.io/badge/coverage-99%25-brightgreen)](https://github.com/nocalla/ha-tfi-live/actions/workflows/ci.yml)
-[![HACS: Custom](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://hacs.xyz)
+[![HACS: Custom Repository](https://img.shields.io/badge/HACS-Custom%20Repository-orange.svg)](https://hacs.xyz/docs/faq/custom_repositories/)
 [![HA: 2024.1+](https://img.shields.io/badge/Home%20Assistant-2024.1%2B-41bdf5.svg)](https://www.home-assistant.io)
 [![Python: 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)](https://github.com/nocalla/ha-tfi-live/blob/main/pyproject.toml)
 
@@ -32,9 +32,12 @@ Each configured sensor reports the minutes to the next departure for a given sto
 
 ### HACS (recommended)
 
-1. Add this repository as a custom repository in HACS (category: Integration).
-2. Search for **TFI Live** and install.
-3. Restart Home Assistant.
+This integration is not yet in the default HACS store, so it must be added as a custom repository:
+
+1. In HACS, go to **Integrations → ⋮ → Custom repositories**.
+2. Add `https://github.com/nocalla/ha-tfi-live` with category **Integration**.
+3. Search for **TFI Live** in HACS and install.
+4. Restart Home Assistant.
 
 ### Manual
 
