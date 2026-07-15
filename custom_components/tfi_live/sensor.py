@@ -311,6 +311,29 @@ class TfiLiveSensor(CoordinatorEntity[TfiLiveCoordinator], SensorEntity):
                 # Only store the first matching stop_time_update per trip.
                 break
 
+        if _logger.isEnabledFor(logging.DEBUG):
+            all_stop_ids = {
+                stu["stop_id"]
+                for entity in entities
+                for stu in entity["stop_time_updates"]
+            }
+            near_miss = sorted(
+                sid for sid in all_stop_ids if sid.startswith(self._stop_id[:6])
+            )[:10]
+            _logger.debug(
+                "[TEMP-DEBUG] RT scan for stop_id=%s route_id=%s: %d feed "
+                "entities, matched %d trip(s) for this stop; %d distinct "
+                "stop_ids seen across the whole feed; near-miss stop_ids "
+                "sharing prefix %r: %s",
+                self._stop_id,
+                self._route_id,
+                len(entities),
+                len(rt_by_trip),
+                len(all_stop_ids),
+                self._stop_id[:6],
+                near_miss,
+            )
+
         # Fetch scheduled departures from static cache.
         static_departures = self.coordinator.cache.get_scheduled_departures(
             self._stop_id,
@@ -325,6 +348,21 @@ class TfiLiveSensor(CoordinatorEntity[TfiLiveCoordinator], SensorEntity):
             trip_id: (sched_time, route_name)
             for trip_id, sched_time, route_name in static_departures
         }
+
+        if _logger.isEnabledFor(logging.DEBUG):
+            static_trip_ids = set(static_by_trip)
+            rt_trip_ids = set(rt_by_trip)
+            _logger.debug(
+                "[TEMP-DEBUG] RT/static trip_id overlap for stop_id=%s: %d "
+                "static trip(s), %d RT trip(s) for this stop, %d "
+                "overlapping; static-only sample: %s; RT-only sample: %s",
+                self._stop_id,
+                len(static_trip_ids),
+                len(rt_trip_ids),
+                len(static_trip_ids & rt_trip_ids),
+                sorted(static_trip_ids - rt_trip_ids)[:5],
+                sorted(rt_trip_ids - static_trip_ids)[:5],
+            )
 
         candidates: list[dict[str, Any]] = []
 
