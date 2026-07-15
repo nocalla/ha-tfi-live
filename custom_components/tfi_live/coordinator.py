@@ -83,8 +83,10 @@ class TfiLiveCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         Raises:
             ConfigEntryAuthFailed: When the feed responds with HTTP 401.
+                Carries ``translation_key="invalid_api_key"``.
             UpdateFailed: On any other HTTP error, network error, or parse
-                failure.
+                failure. Carries ``translation_key`` of ``"cannot_connect"``
+                or ``"cannot_parse"`` depending on the failure kind.
         """
         # Never schedule the memory-heavy static load before the first
         # successful refresh — a setup-retry loop would re-trigger it on
@@ -104,7 +106,11 @@ class TfiLiveCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "GTFS-RT feed returned HTTP 401 — re-authentication required",
             )
             self._config_entry.async_start_reauth(self.hass)
-            raise ConfigEntryAuthFailed("Invalid API key") from exc
+            raise ConfigEntryAuthFailed(
+                "Invalid API key",
+                translation_domain=DOMAIN,
+                translation_key="invalid_api_key",
+            ) from exc
         except GtfsRtFetchError as exc:
             self._log_once(
                 "client_error",
@@ -112,7 +118,12 @@ class TfiLiveCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "GTFS-RT network error: %s",
                 exc,
             )
-            raise UpdateFailed(str(exc)) from exc
+            raise UpdateFailed(
+                str(exc),
+                translation_domain=DOMAIN,
+                translation_key="cannot_connect",
+                translation_placeholders={"error": str(exc)},
+            ) from exc
         except GtfsRtParseError as exc:
             self._log_once(
                 "parse_error",
@@ -120,7 +131,12 @@ class TfiLiveCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "Failed to parse GTFS-RT response: %s",
                 exc,
             )
-            raise UpdateFailed(str(exc)) from exc
+            raise UpdateFailed(
+                str(exc),
+                translation_domain=DOMAIN,
+                translation_key="cannot_parse",
+                translation_placeholders={"error": str(exc)},
+            ) from exc
 
         entities = [
             {

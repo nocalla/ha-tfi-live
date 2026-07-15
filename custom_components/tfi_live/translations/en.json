@@ -105,5 +105,23 @@
       "title": "Sensor stop/route pair not found in the schedule",
       "description": "Stop ID `{stop_id}` and route ID `{route_id}` never appear together in the static GTFS schedule, so the following sensor(s) will never report a departure: {sensor_names}. This usually means a stop_code or route_short_name (the numbers shown on the bus stop sign or in the TFI Live app) was entered instead of the real GTFS stop_id/route_id. Edit the affected sensor(s) to correct the value."
     }
+  },
+  "entity": {
+    "sensor": {
+      "next_departure": {
+        "name": "Next departure"
+      }
+    }
+  },
+  "exceptions": {
+    "invalid_api_key": {
+      "message": "Invalid API key — authentication failed."
+    },
+    "cannot_connect": {
+      "message": "Unable to reach the NTA GTFS-RT feed: {error}"
+    },
+    "cannot_parse": {
+      "message": "Failed to parse the GTFS-RT feed response: {error}"
+    }
   }
 }

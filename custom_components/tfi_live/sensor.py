@@ -91,7 +91,9 @@ class TfiLiveSensor(CoordinatorEntity[TfiLiveCoordinator], SensorEntity):
 
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = UnitOfTime.MINUTES
-    # DURATION requires non-negative values; minutes-to-departure can be negative
+    # IQS `entity-device-class` (Platinum): no SensorDeviceClass fits — DURATION
+    # requires non-negative values, but minutes-to-departure goes negative for
+    # an overdue service. Accepted exception to the rule, not an oversight.
     _attr_device_class = None
     _attr_has_entity_name = True
     # Drives the icon lookup in icons.json; entity names come from user config
