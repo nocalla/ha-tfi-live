@@ -285,6 +285,61 @@ def test_departures_attribute_at_most_3(mock_coordinator, sensor_config):
 
 
 # ---------------------------------------------------------------------------
+# Issue #115 — configurable number of upcoming services
+# ---------------------------------------------------------------------------
+
+
+def test_departures_attribute_respects_custom_num_departures_of_1(
+    mock_coordinator, sensor_config
+):
+    """Given num_departures=1, at most 1 entry is reported even with 5 matches."""
+    # Arrange — 5 RT entities each 1 min apart starting at 5 min from now
+    entities = [make_rt_entity(f"T{i}", minutes_from_now=5.0 + i) for i in range(1, 6)]
+    mock_coordinator.data = {"entities": entities}
+    s = TfiLiveSensor(mock_coordinator, sensor_config, "entry_123", num_departures=1)
+
+    # Act
+    attrs = s.extra_state_attributes
+
+    # Assert
+    assert len(attrs[ATTR_DEPARTURES]) == 1
+
+
+def test_departures_attribute_respects_custom_num_departures_of_10(
+    mock_coordinator, sensor_config
+):
+    """Given num_departures=10, all matching departures are reported."""
+    # Arrange — 5 RT entities each 1 min apart starting at 5 min from now
+    entities = [make_rt_entity(f"T{i}", minutes_from_now=5.0 + i) for i in range(1, 6)]
+    mock_coordinator.data = {"entities": entities}
+    s = TfiLiveSensor(mock_coordinator, sensor_config, "entry_123", num_departures=10)
+
+    # Act
+    attrs = s.extra_state_attributes
+
+    # Assert
+    assert len(attrs[ATTR_DEPARTURES]) == 5
+
+
+def test_departures_attribute_defaults_to_3_when_num_departures_unset(
+    mock_coordinator, sensor_config
+):
+    """A sensor built without num_departures (simulating a pre-#115 entry)
+    still reports at most 3 departures — the existing default.
+    """
+    # Arrange — 5 RT entities each 1 min apart starting at 5 min from now
+    entities = [make_rt_entity(f"T{i}", minutes_from_now=5.0 + i) for i in range(1, 6)]
+    mock_coordinator.data = {"entities": entities}
+    s = TfiLiveSensor(mock_coordinator, sensor_config, "entry_123")
+
+    # Act
+    attrs = s.extra_state_attributes
+
+    # Assert
+    assert len(attrs[ATTR_DEPARTURES]) == 3
+
+
+# ---------------------------------------------------------------------------
 # Departures attribute: exact keys, no extras
 # ---------------------------------------------------------------------------
 
@@ -1004,3 +1059,51 @@ async def test_sensor_async_setup_entry_registers_entities() -> None:
     assert all(isinstance(e, TfiLiveSensor) for e in added)
     assert added[0]._stop_id == "S1"
     assert added[1]._stop_id == "S2"
+    # No CONF_NUM_DEPARTURES stored on this entry — sensors fall back to the
+    # existing default (#115: pre-existing entries carry no stored value).
+    assert added[0]._num_departures == 3
+    assert added[1]._num_departures == 3
+
+
+async def test_sensor_async_setup_entry_uses_configured_num_departures() -> None:
+    """sensor.async_setup_entry threads CONF_NUM_DEPARTURES into every sensor.
+
+    Arrange: entry.data carries CONF_NUM_DEPARTURES=7 alongside one sensor.
+    Act: call sensor.async_setup_entry.
+    Assert: the created sensor's _num_departures matches the stored value.
+    """
+    from unittest.mock import MagicMock
+
+    from custom_components.tfi_live.const import CONF_NUM_DEPARTURES, CONF_SENSORS
+    from custom_components.tfi_live.sensor import (
+        TfiLiveSensor,
+        async_setup_entry,
+    )
+
+    coord = MagicMock()
+    coord.last_update_success = True
+    coord._last_successful_fetch = None
+    coord.data = {"entities": []}
+    coord._cache = MagicMock()
+    coord.cache = coord._cache
+    coord._cache.get_scheduled_departures.return_value = []
+
+    entry = MagicMock()
+    entry.entry_id = "eid"
+    entry.runtime_data = coord
+    entry.data = {
+        CONF_NUM_DEPARTURES: 7,
+        CONF_SENSORS: [{"stop_id": "S1", "route_id": "46A", "name": "Sensor 1"}],
+    }
+
+    hass = MagicMock()
+    added: list[TfiLiveSensor] = []
+
+    def fake_add(entities, _update):
+        """Capture entities passed to async_add_entities."""
+        added.extend(entities)
+
+    await async_setup_entry(hass, entry, fake_add)
+
+    assert len(added) == 1
+    assert added[0]._num_departures == 7

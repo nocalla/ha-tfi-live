@@ -52,6 +52,7 @@ Navigate to **Settings → Devices & Services → Add Integration** and search f
 | API Key | — | Your NTA API key |
 | Trip Updates URL | NTA GTFS-RT endpoint | Leave as default unless using a mirror |
 | Static GTFS URL | NTA static GTFS endpoint | Leave as default unless using a mirror |
+| Number of upcoming services | 3 | How many upcoming departures (1-10) each sensor reports in its `departures` attribute |
 
 ### Step 2 — Add a sensor
 
@@ -69,7 +70,7 @@ Stop and route IDs can be found in the [NTA GTFS static data](https://www.transp
 
 ### Reconfiguration
 
-To change the API key or feed URLs after initial setup, go to **Settings → Devices & Services → TFI Live → Configure**.
+To change the API key, feed URLs, or number of upcoming services after initial setup, go to **Settings → Devices & Services → TFI Live → Configure**.
 
 ## Removal
 

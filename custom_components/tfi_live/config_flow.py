@@ -40,15 +40,19 @@ from .const import (
     ALL_ROUTES_SENTINEL,
     CONF_API_KEY,
     CONF_DIRECTION_ID,
+    CONF_NUM_DEPARTURES,
     CONF_OPERATOR_ID,
     CONF_ROUTE_ID,
     CONF_SENSORS,
     CONF_STATIC_GTFS_URL,
     CONF_STOP_ID,
     CONF_TRIP_UPDATE_URL,
+    DEFAULT_NUM_DEPARTURES,
     DEFAULT_STATIC_GTFS_URL,
     DEFAULT_TRIP_UPDATE_URL,
     DOMAIN,
+    NUM_DEPARTURES_MAX,
+    NUM_DEPARTURES_MIN,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -82,6 +86,28 @@ def _url_validator(value: str) -> str:
     except Exception as exc:
         raise vol.Invalid("invalid_url") from exc
     return value
+
+
+def _validate_num_departures(value: str) -> int:
+    """Validate and parse the "number of upcoming services" field.
+
+    Args:
+        value: The raw string entered by the user.
+
+    Returns:
+        The parsed integer value.
+
+    Raises:
+        vol.Invalid: If the value is not an integer between
+            ``NUM_DEPARTURES_MIN`` and ``NUM_DEPARTURES_MAX`` inclusive.
+    """
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise vol.Invalid("invalid_num_departures") from exc
+    if not (NUM_DEPARTURES_MIN <= parsed <= NUM_DEPARTURES_MAX):
+        raise vol.Invalid("invalid_num_departures")
+    return parsed
 
 
 async def _probe_feed(
@@ -519,6 +545,9 @@ class TfiLiveConfigFlow(_SensorPickerFlow, config_entries.ConfigFlow, domain=DOM
             api_key: str = user_input.get(CONF_API_KEY, "").strip()
             trip_update_url: str = user_input.get(CONF_TRIP_UPDATE_URL, "").strip()
             static_gtfs_url: str = user_input.get(CONF_STATIC_GTFS_URL, "").strip()
+            num_departures_raw: str = str(
+                user_input.get(CONF_NUM_DEPARTURES, DEFAULT_NUM_DEPARTURES)
+            ).strip()
 
             if not api_key:
                 errors[CONF_API_KEY] = "required"
@@ -535,6 +564,12 @@ class TfiLiveConfigFlow(_SensorPickerFlow, config_entries.ConfigFlow, domain=DOM
                 except vol.Invalid:
                     errors[CONF_STATIC_GTFS_URL] = "invalid_url"
 
+            num_departures = DEFAULT_NUM_DEPARTURES
+            try:
+                num_departures = _validate_num_departures(num_departures_raw)
+            except vol.Invalid:
+                errors[CONF_NUM_DEPARTURES] = "invalid_num_departures"
+
             if not errors:
                 await _probe_feed(self.hass, trip_update_url, api_key, errors)
 
@@ -543,6 +578,7 @@ class TfiLiveConfigFlow(_SensorPickerFlow, config_entries.ConfigFlow, domain=DOM
                     CONF_API_KEY: api_key,
                     CONF_TRIP_UPDATE_URL: trip_update_url,
                     CONF_STATIC_GTFS_URL: static_gtfs_url,
+                    CONF_NUM_DEPARTURES: num_departures,
                     CONF_SENSORS: [],
                 }
                 return await self.async_step_stop()
@@ -555,6 +591,9 @@ class TfiLiveConfigFlow(_SensorPickerFlow, config_entries.ConfigFlow, domain=DOM
                 ): str,
                 vol.Required(
                     CONF_STATIC_GTFS_URL, default=DEFAULT_STATIC_GTFS_URL
+                ): str,
+                vol.Optional(
+                    CONF_NUM_DEPARTURES, default=str(DEFAULT_NUM_DEPARTURES)
                 ): str,
             }
         )
@@ -662,6 +701,9 @@ class TfiLiveConfigFlow(_SensorPickerFlow, config_entries.ConfigFlow, domain=DOM
             api_key: str = user_input.get(CONF_API_KEY, "").strip()
             trip_update_url: str = user_input.get(CONF_TRIP_UPDATE_URL, "").strip()
             static_gtfs_url: str = user_input.get(CONF_STATIC_GTFS_URL, "").strip()
+            num_departures_raw: str = str(
+                user_input.get(CONF_NUM_DEPARTURES, DEFAULT_NUM_DEPARTURES)
+            ).strip()
 
             if not api_key:
                 errors[CONF_API_KEY] = "required"
@@ -678,6 +720,12 @@ class TfiLiveConfigFlow(_SensorPickerFlow, config_entries.ConfigFlow, domain=DOM
                 except vol.Invalid:
                     errors[CONF_STATIC_GTFS_URL] = "invalid_url"
 
+            num_departures = DEFAULT_NUM_DEPARTURES
+            try:
+                num_departures = _validate_num_departures(num_departures_raw)
+            except vol.Invalid:
+                errors[CONF_NUM_DEPARTURES] = "invalid_num_departures"
+
             if not errors:
                 await _probe_feed(self.hass, trip_update_url, api_key, errors)
 
@@ -689,6 +737,7 @@ class TfiLiveConfigFlow(_SensorPickerFlow, config_entries.ConfigFlow, domain=DOM
                         CONF_API_KEY: api_key,
                         CONF_TRIP_UPDATE_URL: trip_update_url,
                         CONF_STATIC_GTFS_URL: static_gtfs_url,
+                        CONF_NUM_DEPARTURES: num_departures,
                     },
                     reason="reconfigure_successful",
                 )
@@ -709,6 +758,12 @@ class TfiLiveConfigFlow(_SensorPickerFlow, config_entries.ConfigFlow, domain=DOM
                     CONF_STATIC_GTFS_URL,
                     default=entry.data.get(
                         CONF_STATIC_GTFS_URL, DEFAULT_STATIC_GTFS_URL
+                    ),
+                ): str,
+                vol.Optional(
+                    CONF_NUM_DEPARTURES,
+                    default=str(
+                        entry.data.get(CONF_NUM_DEPARTURES, DEFAULT_NUM_DEPARTURES)
                     ),
                 ): str,
             }

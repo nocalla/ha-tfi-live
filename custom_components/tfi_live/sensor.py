@@ -22,14 +22,15 @@ from .const import (
     ATTR_ROUTE_ID,
     ATTR_STOP_ID,
     AVAILABILITY_WINDOW_SECONDS,
+    CONF_NUM_DEPARTURES,
     CONF_SENSORS,
+    DEFAULT_NUM_DEPARTURES,
     DEP_DELAY_MINUTES,
     DEP_REALTIME_TIME,
     DEP_ROUTE_NAME,
     DEP_SCHEDULED_TIME,
     DEP_TRIP_ID,
     DOMAIN,
-    MAX_DEPARTURES,
 )
 from .coordinator import TfiLiveCoordinator
 
@@ -68,8 +69,9 @@ async def async_setup_entry(
         async_add_entities: Callback used to register new entities.
     """
     coordinator: TfiLiveCoordinator = entry.runtime_data
+    num_departures: int = entry.data.get(CONF_NUM_DEPARTURES, DEFAULT_NUM_DEPARTURES)
     entities = [
-        TfiLiveSensor(coordinator, sensor_config, entry.entry_id)
+        TfiLiveSensor(coordinator, sensor_config, entry.entry_id, num_departures)
         for sensor_config in entry.data[CONF_SENSORS]
     ]
     async_add_entities(entities, True)
@@ -104,6 +106,7 @@ class TfiLiveSensor(CoordinatorEntity[TfiLiveCoordinator], SensorEntity):
         coordinator: TfiLiveCoordinator,
         sensor_config: dict[str, Any],
         entry_id: str,
+        num_departures: int = DEFAULT_NUM_DEPARTURES,
     ) -> None:
         """Initialise the sensor with coordinator, config, and entry identity.
 
@@ -112,6 +115,9 @@ class TfiLiveSensor(CoordinatorEntity[TfiLiveCoordinator], SensorEntity):
             sensor_config: Dict of sensor-level config values from the config
                 entry (stop_id, route_id, direction_id, operator_id, name).
             entry_id: The config entry ID, used to build a stable unique_id.
+            num_departures: Maximum number of entries to report in the
+                ``departures`` attribute, from the config entry's
+                ``CONF_NUM_DEPARTURES`` (defaulting for pre-#115 entries).
         """
         super().__init__(coordinator)
         self._stop_id: str = sensor_config["stop_id"]
@@ -120,6 +126,7 @@ class TfiLiveSensor(CoordinatorEntity[TfiLiveCoordinator], SensorEntity):
         self._operator_id: str | None = sensor_config.get("operator_id")
         self._name: str = sensor_config["name"]
         self._entry_id: str = entry_id
+        self._num_departures: int = num_departures
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry_id)},
             name="TFI Live",
@@ -200,8 +207,8 @@ class TfiLiveSensor(CoordinatorEntity[TfiLiveCoordinator], SensorEntity):
 
         When unavailable all values are ``None``.  When available, returns the
         configured stop/route/direction/operator identifiers, the departures
-        list (at most ``MAX_DEPARTURES`` entries), and an ISO 8601 timestamp of
-        the last successful coordinator update.
+        list (at most ``self._num_departures`` entries), and an ISO 8601
+        timestamp of the last successful coordinator update.
 
         Returns:
             Dict with keys ``stop_id``, ``route_id``, ``direction_id``,
@@ -252,8 +259,8 @@ class TfiLiveSensor(CoordinatorEntity[TfiLiveCoordinator], SensorEntity):
         Retrieves GTFS-RT trip updates from the coordinator and scheduled
         departures from the static cache, merges them on ``trip_id``, filters
         to those not yet departed (with a grace period of ``_GRACE_MINUTES``),
-        and returns at most ``MAX_DEPARTURES`` entries sorted ascending by
-        effective departure time.
+        and returns at most ``self._num_departures`` entries sorted ascending
+        by effective departure time.
 
         Each returned dict contains all five public keys plus an internal
         ``_effective_dt`` datetime used for sorting and state calculation.
@@ -373,7 +380,7 @@ class TfiLiveSensor(CoordinatorEntity[TfiLiveCoordinator], SensorEntity):
         # Sort ascending by effective departure time.
         candidates.sort(key=lambda c: c["_effective_dt"])
 
-        return candidates[:MAX_DEPARTURES]
+        return candidates[: self._num_departures]
 
 
 def _parse_hhmm_today(hhmm: str) -> datetime:

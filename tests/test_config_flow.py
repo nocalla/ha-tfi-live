@@ -43,6 +43,7 @@ from custom_components.tfi_live.const import (
     ALL_ROUTES_SENTINEL,
     CONF_API_KEY,
     CONF_DIRECTION_ID,
+    CONF_NUM_DEPARTURES,
     CONF_ROUTE_ID,
     CONF_SENSORS,
     CONF_STATIC_GTFS_URL,
@@ -337,6 +338,95 @@ async def test_step1_invalid_static_url(flow: TfiLiveConfigFlow) -> None:
     # Assert
     assert result["type"] == FlowResultType.FORM
     assert result["errors"][CONF_STATIC_GTFS_URL] == "invalid_url"
+
+
+# ---------------------------------------------------------------------------
+# Issue #115 — configurable number of upcoming services (step 1)
+# ---------------------------------------------------------------------------
+
+
+async def test_step1_non_numeric_num_departures_returns_error(
+    flow: TfiLiveConfigFlow,
+) -> None:
+    """Step 1 with a non-numeric num_departures returns invalid_num_departures."""
+    user_input = {**VALID_STEP1, CONF_NUM_DEPARTURES: "not-a-number"}
+
+    result = await flow.async_step_user(user_input)
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["errors"][CONF_NUM_DEPARTURES] == "invalid_num_departures"
+
+
+async def test_step1_num_departures_zero_returns_error(
+    flow: TfiLiveConfigFlow,
+) -> None:
+    """Step 1 with num_departures=0 (below the 1-10 range) returns an error."""
+    user_input = {**VALID_STEP1, CONF_NUM_DEPARTURES: "0"}
+
+    result = await flow.async_step_user(user_input)
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["errors"][CONF_NUM_DEPARTURES] == "invalid_num_departures"
+
+
+async def test_step1_num_departures_11_returns_error(
+    flow: TfiLiveConfigFlow,
+) -> None:
+    """Step 1 with num_departures=11 (above the 1-10 range) returns an error."""
+    user_input = {**VALID_STEP1, CONF_NUM_DEPARTURES: "11"}
+
+    result = await flow.async_step_user(user_input)
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["errors"][CONF_NUM_DEPARTURES] == "invalid_num_departures"
+
+
+async def test_step1_num_departures_1_is_accepted(flow: TfiLiveConfigFlow) -> None:
+    """Step 1 with num_departures=1 (the lower bound) is accepted and staged."""
+    user_input = {**VALID_STEP1, CONF_NUM_DEPARTURES: "1"}
+
+    with _patch_probe_client(), _patch_picker_client():
+        result = await flow.async_step_user(user_input)
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "stop"
+    assert flow._config[CONF_NUM_DEPARTURES] == 1
+
+
+async def test_step1_num_departures_10_is_accepted(flow: TfiLiveConfigFlow) -> None:
+    """Step 1 with num_departures=10 (the upper bound) is accepted and staged."""
+    user_input = {**VALID_STEP1, CONF_NUM_DEPARTURES: "10"}
+
+    with _patch_probe_client(), _patch_picker_client():
+        result = await flow.async_step_user(user_input)
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "stop"
+    assert flow._config[CONF_NUM_DEPARTURES] == 10
+
+
+async def test_step1_omitted_num_departures_defaults_to_3(
+    flow: TfiLiveConfigFlow,
+) -> None:
+    """Step 1 with no num_departures field staged defaults to 3."""
+    with _patch_probe_client(), _patch_picker_client():
+        result = await flow.async_step_user(VALID_STEP1)
+
+    assert result["type"] == FlowResultType.FORM
+    assert flow._config[CONF_NUM_DEPARTURES] == 3
+
+
+async def test_step1_schema_has_num_departures_default(
+    flow: TfiLiveConfigFlow,
+) -> None:
+    """Step 1 initial render schema includes num_departures defaulting to '3'."""
+    result = await flow.async_step_user(None)
+
+    schema = result["data_schema"]
+    assert schema is not None
+    for key in schema.schema:
+        if str(key) == CONF_NUM_DEPARTURES:
+            assert key.default() == "3"
 
 
 @contextmanager
@@ -1245,6 +1335,82 @@ async def test_reconfigure_invalid_static_url_returns_error(
 
     assert result["type"] == FlowResultType.FORM
     assert result["errors"].get(CONF_STATIC_GTFS_URL) == "invalid_url"
+
+
+# ---------------------------------------------------------------------------
+# Issue #115 — configurable number of upcoming services (reconfigure)
+# ---------------------------------------------------------------------------
+
+
+async def test_reconfigure_num_departures_invalid_returns_error(
+    mock_hass: MagicMock,
+) -> None:
+    """Reconfigure with an out-of-range num_departures re-shows the form."""
+    flow, _ = _make_flow_with_reconfigure_entry(mock_hass)
+
+    result = await flow.async_step_reconfigure(
+        {
+            CONF_API_KEY: "new-key",
+            CONF_TRIP_UPDATE_URL: "https://new.example.com",
+            CONF_STATIC_GTFS_URL: "https://newgtfs.example.com",
+            CONF_NUM_DEPARTURES: "11",
+        }
+    )
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["errors"][CONF_NUM_DEPARTURES] == "invalid_num_departures"
+
+
+async def test_reconfigure_num_departures_updates_stored_value(
+    mock_hass: MagicMock,
+) -> None:
+    """Reconfigure with a valid num_departures updates the stored entry value."""
+    flow, _ = _make_flow_with_reconfigure_entry(mock_hass)
+
+    with _patch_probe_client():
+        result = await flow.async_step_reconfigure(
+            {
+                CONF_API_KEY: "new-key",
+                CONF_TRIP_UPDATE_URL: "https://new.example.com",
+                CONF_STATIC_GTFS_URL: "https://newgtfs.example.com",
+                CONF_NUM_DEPARTURES: "5",
+            }
+        )
+
+    assert result["type"] == FlowResultType.ABORT
+    assert result["_updated_data"][CONF_NUM_DEPARTURES] == 5
+
+
+async def test_reconfigure_initial_render_prefills_num_departures_default(
+    mock_hass: MagicMock,
+) -> None:
+    """Reconfigure of an entry with no stored value pre-fills the default."""
+    flow, mock_entry = _make_flow_with_reconfigure_entry(mock_hass)
+    assert CONF_NUM_DEPARTURES not in mock_entry.data
+
+    result = await flow.async_step_reconfigure(None)
+
+    schema = result["data_schema"]
+    assert schema is not None
+    for key in schema.schema:
+        if str(key) == CONF_NUM_DEPARTURES:
+            assert key.default() == "3"
+
+
+async def test_reconfigure_initial_render_prefills_stored_num_departures(
+    mock_hass: MagicMock,
+) -> None:
+    """Reconfigure of an entry with a stored value pre-fills that value."""
+    flow, mock_entry = _make_flow_with_reconfigure_entry(mock_hass)
+    mock_entry.data = {**mock_entry.data, CONF_NUM_DEPARTURES: 8}
+
+    result = await flow.async_step_reconfigure(None)
+
+    schema = result["data_schema"]
+    assert schema is not None
+    for key in schema.schema:
+        if str(key) == CONF_NUM_DEPARTURES:
+            assert key.default() == "8"
 
 
 def test_async_get_options_flow_returns_handler() -> None:

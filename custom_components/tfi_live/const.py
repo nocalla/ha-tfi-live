@@ -30,6 +30,7 @@ CONF_ROUTE_ID: Final[str] = "route_id"
 CONF_DIRECTION_ID: Final[str] = "direction_id"
 CONF_OPERATOR_ID: Final[str] = "operator_id"
 CONF_SENSORS: Final[str] = "sensors"
+CONF_NUM_DEPARTURES: Final[str] = "num_departures"
 
 # Sensor extra_state_attributes keys
 ATTR_STOP_ID: Final[str] = "stop_id"
@@ -57,4 +58,10 @@ ALL_ROUTES_SENTINEL: Final[str] = "__all_routes__"
 UPDATE_INTERVAL_SECONDS: Final[int] = 60
 AVAILABILITY_WINDOW_SECONDS: Final[int] = 180
 STATIC_GTFS_REFRESH_HOURS: Final[int] = 24
-MAX_DEPARTURES: Final[int] = 3
+
+# Number-of-upcoming-services setting (#115) — default and valid range for
+# CONF_NUM_DEPARTURES. Entries created before this feature carry no stored
+# value and fall back to DEFAULT_NUM_DEPARTURES at read time.
+DEFAULT_NUM_DEPARTURES: Final[int] = 3
+NUM_DEPARTURES_MIN: Final[int] = 1
+NUM_DEPARTURES_MAX: Final[int] = 10
