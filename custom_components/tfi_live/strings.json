@@ -3,6 +3,7 @@
     "step": {
       "user": {
         "title": "TFI Live — Integration Setup",
+        "description": "See the [README](https://github.com/nocalla/ha-tfi-live#step-1--integration-settings) for details.",
         "data": {
           "api_key": "API Key",
           "trip_update_url": "Trip Updates Feed URL",
@@ -11,14 +12,14 @@
       },
       "stop": {
         "title": "Choose a Stop",
-        "description": "Search for the stop by the code printed on the pole or by name.",
+        "description": "Search for the stop by the code printed on the pole or by name. See the [README](https://github.com/nocalla/ha-tfi-live#step-2--add-a-sensor) for details.",
         "data": {
           "stop_id": "Stop"
         }
       },
       "route": {
         "title": "Choose a Route",
-        "description": "Pick a route serving this stop, or 'All routes at this stop' to monitor every departure.",
+        "description": "Pick a route serving this stop, or 'All routes at this stop' to monitor every departure. See the [README](https://github.com/nocalla/ha-tfi-live#step-2--add-a-sensor) for details.",
         "data": {
           "route_id": "Route",
           "name": "Sensor Name",
@@ -36,12 +37,14 @@
       },
       "reauth_confirm": {
         "title": "Re-authenticate TFI Live",
+        "description": "See the [README](https://github.com/nocalla/ha-tfi-live#re-authentication) for details.",
         "data": {
           "api_key": "New API Key"
         }
       },
       "reconfigure": {
         "title": "Reconfigure TFI Live",
+        "description": "See the [README](https://github.com/nocalla/ha-tfi-live#reconfiguration) for details.",
         "data": {
           "api_key": "API Key",
           "trip_update_url": "Trip Updates Feed URL",
@@ -69,14 +72,14 @@
     "step": {
       "stop": {
         "title": "Choose a Stop",
-        "description": "Search for the stop by the code printed on the pole or by name.",
+        "description": "Search for the stop by the code printed on the pole or by name. See the [README](https://github.com/nocalla/ha-tfi-live#step-2--add-a-sensor) for details.",
         "data": {
           "stop_id": "Stop"
         }
       },
       "route": {
         "title": "Choose a Route",
-        "description": "Pick a route serving this stop, or 'All routes at this stop' to monitor every departure.",
+        "description": "Pick a route serving this stop, or 'All routes at this stop' to monitor every departure. See the [README](https://github.com/nocalla/ha-tfi-live#step-2--add-a-sensor) for details.",
         "data": {
           "route_id": "Route",
           "name": "Sensor Name",

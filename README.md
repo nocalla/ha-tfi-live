@@ -45,7 +45,7 @@ Each configured sensor reports the minutes to the next departure for a given sto
 
 Navigate to **Settings → Devices & Services → Add Integration** and search for **TFI Live**.
 
-**Step 1 — Integration settings**
+### Step 1 — Integration settings
 
 | Field | Default | Description |
 |---|---|---|
@@ -53,7 +53,7 @@ Navigate to **Settings → Devices & Services → Add Integration** and search f
 | Trip Updates URL | NTA GTFS-RT endpoint | Leave as default unless using a mirror |
 | Static GTFS URL | NTA static GTFS endpoint | Leave as default unless using a mirror |
 
-**Step 2 — Add a sensor**
+### Step 2 — Add a sensor
 
 | Field | Required | Description |
 |---|---|---|
@@ -66,6 +66,10 @@ Navigate to **Settings → Devices & Services → Add Integration** and search f
 After adding a sensor you can add another or finish. Additional sensors can be added later by re-entering the config flow.
 
 Stop and route IDs can be found in the [NTA GTFS static data](https://www.transportforireland.ie/transitData/PT_Data.html) or via tools such as [Transitland](https://www.transit.land/).
+
+### Reconfiguration
+
+To change the API key or feed URLs after initial setup, go to **Settings → Devices & Services → TFI Live → Configure**.
 
 ## Removal
 
@@ -146,7 +150,11 @@ The policy limits each API token to **one GTFS-RT request every 60 seconds**. Th
 |---|---|---|
 | Sensor shows *unavailable* | Feed unreachable or API key rejected | Check the HA log for HTTP error codes; verify the API key at [developer.nationaltransport.ie](https://developer.nationaltransport.ie) |
 | No departures shown | Incorrect stop/route/direction | Cross-reference stop_id and route_id against the [NTA GTFS static data](https://www.transportforireland.ie/transitData/Data/GTFS_Realtime.zip) |
-| Re-authentication prompt | API key rejected (HTTP 401) | Go to **Settings → Integrations → TFI Live → Re-authenticate** and enter a valid key |
+| Re-authentication prompt | API key rejected (HTTP 401) | See [Re-authentication](#re-authentication) below |
+
+### Re-authentication
+
+If the NTA API key is rejected (HTTP 401), Home Assistant will prompt you to re-authenticate. Go to **Settings → Devices & Services → TFI Live → Re-authenticate** and enter a valid key.
 
 ## Development
 
