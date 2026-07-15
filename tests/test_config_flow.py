@@ -1434,6 +1434,139 @@ async def test_options_flow_direction_id_non_integer(
     assert result["errors"].get(CONF_DIRECTION_ID) == "invalid_direction"
 
 
+async def test_options_flow_stop_load_failure_shows_error(
+    options_flow: TfiLiveOptionsFlowHandler,
+) -> None:
+    """Issue #113: a load error on the options-flow stop step surfaces a form error.
+
+    Mirrors #110's config-flow coverage. No free-text fallback exists —
+    the user must retry the picker.
+    """
+    with _patch_picker_client(load_side_effect=StaticGtfsLoadError("boom")):
+        result = await options_flow.async_step_stop(None)
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "stop"
+    assert result["errors"]["base"] == "cannot_load_static_gtfs"
+
+
+async def test_options_flow_route_narrows_to_stop(
+    options_flow: TfiLiveOptionsFlowHandler,
+) -> None:
+    """Issue #113: the options-flow route step lists only stop-linked routes."""
+    options_flow._pending_stop_id = _STOP.stop_id
+
+    with _patch_picker_client(routes_for_stop=[_ROUTE]) as client:
+        result = await options_flow.async_step_route(None)
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "route"
+    assert result["errors"] == {}
+    client.async_get_routes_for_stop.assert_awaited_once_with(_STOP.stop_id)
+    client.list_routes.assert_not_called()
+
+
+async def test_options_flow_route_falls_back_to_full_list_on_zero_matches(
+    options_flow: TfiLiveOptionsFlowHandler,
+) -> None:
+    """Issue #113: an empty narrowed list falls back to the full route list.
+
+    Mirrors #110's config-flow coverage.
+    """
+    options_flow._pending_stop_id = _STOP.stop_id
+
+    with _patch_picker_client(routes_for_stop=[], all_routes=[_ROUTE]) as client:
+        result = await options_flow.async_step_route(None)
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["errors"]["base"] == "route_list_not_narrowed"
+    client.list_routes.assert_called_once()
+
+
+async def test_options_flow_route_load_failure_shows_error(
+    options_flow: TfiLiveOptionsFlowHandler,
+) -> None:
+    """Issue #113: a load error on the options-flow route step surfaces a form error.
+
+    Mirrors #110's config-flow coverage.
+    """
+    options_flow._pending_stop_id = _STOP.stop_id
+
+    with _patch_picker_client(load_side_effect=StaticGtfsLoadError("boom")):
+        result = await options_flow.async_step_route(None)
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["errors"]["base"] == "cannot_load_static_gtfs"
+
+
+async def test_options_flow_selecting_all_routes_leaves_route_id_unset(
+    options_flow: TfiLiveOptionsFlowHandler,
+) -> None:
+    """Issue #113/#111: picking "All routes at this stop" leaves route_id unset.
+
+    Mirrors #111's config-flow coverage.
+    """
+    options_flow._pending_stop_id = _STOP.stop_id
+
+    result = await options_flow.async_step_route(
+        {**VALID_ROUTE_INPUT, CONF_ROUTE_ID: ALL_ROUTES_SENTINEL}
+    )
+
+    assert result["type"] == FlowResultType.MENU
+    assert options_flow._new_sensors[-1][CONF_ROUTE_ID] is None
+
+
+async def test_options_flow_picker_client_loaded_once_and_reused(
+    options_flow: TfiLiveOptionsFlowHandler,
+) -> None:
+    """Issue #113: the options-flow picker client is loaded once per flow run.
+
+    Rendering the stop step then the route step (the normal single-sensor
+    path, not just repeated 'add another' renders) must not re-download the
+    static GTFS archive, mirroring #110's config-flow coverage.
+    """
+    with (
+        patch(
+            "custom_components.tfi_live.config_flow.async_get_clientsession",
+            return_value=MagicMock(),
+        ),
+        patch(
+            "custom_components.tfi_live.config_flow.StaticGtfsPickerClient"
+        ) as mock_cls,
+    ):
+        client = MagicMock()
+        client.async_load = AsyncMock()
+        client.list_stops = MagicMock(return_value=[_STOP])
+        client.async_get_routes_for_stop = AsyncMock(return_value=[_ROUTE])
+        mock_cls.return_value = client
+
+        await options_flow.async_step_stop(None)
+        options_flow._pending_stop_id = _STOP.stop_id
+        await options_flow.async_step_route(None)
+
+    mock_cls.assert_called_once()
+    client.async_load.assert_awaited_once()
+
+
+async def test_options_flow_async_remove_closes_picker_client(
+    options_flow: TfiLiveOptionsFlowHandler,
+) -> None:
+    """Issue #113: async_remove closes the options-flow's picker client too.
+
+    Mirrors #110's config-flow coverage (test_finish_closes_picker_client) —
+    the close hook lives on the shared mixin, but this proves it also fires
+    correctly for an options-flow instance.
+    """
+    mock_client = MagicMock()
+    mock_client.async_close = AsyncMock()
+    options_flow._picker_client = mock_client
+
+    options_flow.async_remove()
+
+    options_flow.hass.async_create_task.assert_called_once()
+    assert options_flow._picker_client is None
+
+
 async def test_options_flow_uses_entry_static_gtfs_url(
     options_flow: TfiLiveOptionsFlowHandler,
 ) -> None:
