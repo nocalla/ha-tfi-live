@@ -1,7 +1,7 @@
 # HA TFI Live
 
 [![CI](https://github.com/nocalla/ha-tfi-live/actions/workflows/ci.yml/badge.svg)](https://github.com/nocalla/ha-tfi-live/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/badge/release-v0.3.2-blue)](https://github.com/nocalla/ha-tfi-live/releases)
+[![Release](https://img.shields.io/badge/release-v0.3.3-blue)](https://github.com/nocalla/ha-tfi-live/releases)
 [![License](https://img.shields.io/badge/license-MIT-green)](https://github.com/nocalla/ha-tfi-live/blob/main/LICENSE)
 [![Coverage](https://img.shields.io/badge/coverage-99%25-brightgreen)](https://github.com/nocalla/ha-tfi-live/actions/workflows/ci.yml)
 [![HACS: Custom Repository](https://img.shields.io/badge/HACS-Custom%20Repository-orange.svg)](https://hacs.xyz/docs/faq/custom_repositories/)
