@@ -74,11 +74,28 @@ async def async_get_config_entry_diagnostics(
             static_departures = coordinator.cache.get_scheduled_departures(
                 stop_id, None, None, None, date.today()
             )
+            static_trip_ids = [d[0] for d in static_departures]
+            # Full RT payload (all stops touched) for any trip the static
+            # schedule says serves this stop, to catch stop_id shape
+            # mismatches (e.g. child-stop vs parent-station suffixes) that
+            # an exact stop_id match above would silently hide.
+            scheduled_trip_full_dumps = [
+                {
+                    "trip_id": entity["trip_id"],
+                    "route_id": entity["route_id"],
+                    "stop_ids_in_feed": [
+                        stu["stop_id"] for stu in entity.get("stop_time_updates", [])
+                    ],
+                }
+                for entity in entities
+                if entity["trip_id"] in static_trip_ids
+            ]
             debug_stop_dumps.append(
                 {
                     "stop_id": stop_id,
                     "rt_matches": rt_matches,
-                    "static_trip_ids": [d[0] for d in static_departures],
+                    "static_trip_ids": static_trip_ids,
+                    "scheduled_trip_full_dumps": scheduled_trip_full_dumps,
                 }
             )
 
