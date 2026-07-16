@@ -345,10 +345,15 @@ class _SensorPickerFlow:
     ) -> ConfigFlowResult:
         """Handle the stop-search step of the sensor picker.
 
-        Presents a searchable dropdown of every stop in the static GTFS
-        feed, keyed by real ``stop_id`` but labelled with the rider-facing
-        stop code and name. On submission, stores the picked stop and
-        advances to :meth:`async_step_route`.
+        Presents a searchable, virtualized picker (``custom_value=True``
+        opts the field into HA frontend's ``ha-generic-picker`` component
+        instead of the plain unwindowed dropdown) of every stop in the
+        static GTFS feed, keyed by real ``stop_id`` but labelled with the
+        rider-facing stop code and name. ``custom_value`` also allows the
+        frontend to submit arbitrary free text, so any submitted value not
+        matching a real stop in the loaded list is rejected here. On a
+        valid submission, stores the picked stop and advances to
+        :meth:`async_step_route`.
 
         Args:
             user_input: Form data submitted by the user, or ``None`` when
@@ -356,13 +361,9 @@ class _SensorPickerFlow:
 
         Returns:
             A ConfigFlowResult that either re-shows the form with a load
-            error, or advances to :meth:`async_step_route`.
+            or validation error, or advances to :meth:`async_step_route`.
         """
         errors: dict[str, str] = {}
-
-        if user_input is not None:
-            self._pending_stop_id = user_input[CONF_STOP_ID]
-            return await self.async_step_route()
 
         stops: list[Stop] = []
         try:
@@ -372,12 +373,20 @@ class _SensorPickerFlow:
             _LOGGER.warning("Static GTFS picker load failed: %s", exc)
             errors["base"] = "cannot_load_static_gtfs"
 
+        if user_input is not None and not errors:
+            stop_id = user_input[CONF_STOP_ID]
+            if any(stop.stop_id == stop_id for stop in stops):
+                self._pending_stop_id = stop_id
+                return await self.async_step_route()
+            errors[CONF_STOP_ID] = "invalid_stop"
+
         schema = vol.Schema(
             {
                 vol.Required(CONF_STOP_ID): SelectSelector(
                     SelectSelectorConfig(
                         options=_build_stop_options(stops),
                         mode=SelectSelectorMode.DROPDOWN,
+                        custom_value=True,
                     )
                 ),
             }

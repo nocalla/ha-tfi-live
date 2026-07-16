@@ -62,7 +62,8 @@
       "cannot_parse": "The feed responded but is not a GTFS-RT protobuf feed — remove any format=json parameter from the URL.",
       "invalid_auth": "Invalid API key — authentication failed.",
       "cannot_load_static_gtfs": "Couldn't reach the static GTFS feed to load stops and routes — try again shortly.",
-      "route_list_not_narrowed": "No routes found linked to this stop in the schedule — showing the full nationwide route list with operator shown instead."
+      "route_list_not_narrowed": "No routes found linked to this stop in the schedule — showing the full nationwide route list with operator shown instead.",
+      "invalid_stop": "That isn't a stop from the list — pick one of the suggested stops."
     },
     "abort": {
       "reauth_successful": "Re-authentication was successful.",
@@ -101,7 +102,8 @@
     "error": {
       "required": "This field is required.",
       "cannot_load_static_gtfs": "Couldn't reach the static GTFS feed to load stops and routes — try again shortly.",
-      "route_list_not_narrowed": "No routes found linked to this stop in the schedule — showing the full nationwide route list with operator shown instead."
+      "route_list_not_narrowed": "No routes found linked to this stop in the schedule — showing the full nationwide route list with operator shown instead.",
+      "invalid_stop": "That isn't a stop from the list — pick one of the suggested stops."
     }
   },
   "issues": {

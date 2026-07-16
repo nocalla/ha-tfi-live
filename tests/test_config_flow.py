@@ -600,6 +600,43 @@ async def test_stop_selection_advances_to_route(flow: TfiLiveConfigFlow) -> None
     assert flow._pending_stop_id == _STOP.stop_id
 
 
+async def test_stop_selector_opts_into_searchable_picker(
+    flow: TfiLiveConfigFlow,
+) -> None:
+    """The stop field's selector sets custom_value=True.
+
+    This is the config-only switch (issue #129/#121) that moves the field
+    from HA frontend's plain unwindowed ``ha-select`` to the searchable,
+    virtualized ``ha-generic-picker`` component.
+    """
+    flow._config = _prefilled_config()
+
+    with _patch_picker_client():
+        result = await flow.async_step_stop(None)
+
+    schema = result["data_schema"].schema
+    (selector,) = [v for k, v in schema.items() if k == CONF_STOP_ID]
+    assert selector.config["custom_value"] is True
+
+
+async def test_stop_invalid_free_text_rejected(flow: TfiLiveConfigFlow) -> None:
+    """A submitted stop_id not present in the loaded stop list is rejected.
+
+    custom_value=True lets the frontend submit arbitrary free text, so the
+    flow must keep validating the value server-side rather than trusting
+    the selector's own (now permissive) schema validation.
+    """
+    flow._config = _prefilled_config()
+
+    with _patch_picker_client():
+        result = await flow.async_step_stop({CONF_STOP_ID: "not-a-real-stop"})
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "stop"
+    assert result["errors"][CONF_STOP_ID] == "invalid_stop"
+    assert flow._pending_stop_id is None
+
+
 async def test_stop_load_failure_shows_error(flow: TfiLiveConfigFlow) -> None:
     """A StaticGtfsLoadError while listing stops surfaces a form error.
 
@@ -1625,6 +1662,36 @@ async def test_options_flow_init_shows_stop_form(
 
     assert result["type"] == FlowResultType.FORM
     assert result["step_id"] == "stop"
+
+
+async def test_options_flow_stop_selector_opts_into_searchable_picker(
+    options_flow: TfiLiveOptionsFlowHandler,
+) -> None:
+    """Issue #129: options-flow stop field also sets custom_value=True.
+
+    The two flows share ``_SensorPickerFlow.async_step_stop``, but the
+    picker-parity lesson from #113 is that this must be exercised via the
+    options flow directly, not inferred from the config-flow coverage.
+    """
+    with _patch_picker_client():
+        result = await options_flow.async_step_stop(None)
+
+    schema = result["data_schema"].schema
+    (selector,) = [v for k, v in schema.items() if k == CONF_STOP_ID]
+    assert selector.config["custom_value"] is True
+
+
+async def test_options_flow_stop_invalid_free_text_rejected(
+    options_flow: TfiLiveOptionsFlowHandler,
+) -> None:
+    """Issue #129: options-flow stop step also rejects a non-real stop_id."""
+    with _patch_picker_client():
+        result = await options_flow.async_step_stop({CONF_STOP_ID: "not-a-real-stop"})
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "stop"
+    assert result["errors"][CONF_STOP_ID] == "invalid_stop"
+    assert options_flow._pending_stop_id is None
 
 
 async def test_options_flow_adding_sensor_appends_to_entry_data(
