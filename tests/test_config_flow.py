@@ -25,6 +25,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+import voluptuous as vol
 from homeassistant.data_entry_flow import AbortFlow, FlowResultType
 from nta_gtfs import (
     GtfsRtAuthError,
@@ -172,12 +173,17 @@ def _stub_show_menu(flow: object) -> Callable[..., dict[str, Any]]:
     return _show_menu
 
 
+_DEFAULT_TERMINI: dict[int, list[str]] = {0: ["Broadstone"], 1: ["Parnell St"]}
+
+
 @contextmanager
 def _patch_picker_client(
     stops: list[Stop] | None = None,
     routes_for_stop: list[Route] | None = None,
     all_routes: list[Route] | None = None,
     load_side_effect: Exception | None = None,
+    termini_by_direction: dict[int, list[str]] | None = None,
+    termini_side_effect: Exception | None = None,
 ):  # type: ignore[no-untyped-def]
     """Patch the config flow's ``StaticGtfsPickerClient`` with a mock.
 
@@ -195,10 +201,18 @@ def _patch_picker_client(
             fallback list); defaults to a single route.
         load_side_effect: Exception raised by ``async_load``, or ``None``
             for a successful load.
+        termini_by_direction: Maps a ``direction_id`` to the terminus names
+            ``async_get_termini`` returns for it; defaults to one terminus
+            per direction. Ignored when ``termini_side_effect`` is set.
+        termini_side_effect: Exception raised by every ``async_get_termini``
+            call, or ``None`` for the ``termini_by_direction`` behaviour.
 
     Yields:
         The mock picker client instance the flow will use.
     """
+    termini = (
+        termini_by_direction if termini_by_direction is not None else _DEFAULT_TERMINI
+    )
     client = MagicMock()
     client.async_load = AsyncMock(side_effect=load_side_effect)
     client.list_stops = MagicMock(return_value=stops if stops is not None else [_STOP])
@@ -208,6 +222,14 @@ def _patch_picker_client(
     client.list_routes = MagicMock(
         return_value=all_routes if all_routes is not None else [_ROUTE]
     )
+    if termini_side_effect is not None:
+        client.async_get_termini = AsyncMock(side_effect=termini_side_effect)
+    else:
+        client.async_get_termini = AsyncMock(
+            side_effect=lambda stop_id, route_id, direction_id: termini.get(
+                direction_id, []
+            )
+        )
     client.async_close = AsyncMock()
     with (
         patch(
@@ -720,34 +742,160 @@ async def test_route_empty_name_returns_error(flow: TfiLiveConfigFlow) -> None:
     assert result["errors"]["name"] == "required"
 
 
-async def test_route_direction_id_2_returns_error(flow: TfiLiveConfigFlow) -> None:
-    """Direction_id='2' (out of range) returns invalid_direction error."""
-    flow._config = _prefilled_config()
-    flow._pending_stop_id = _STOP.stop_id
+def _direction_options(schema: vol.Schema) -> list[dict[str, str]]:
+    """Extract the direction field's SelectSelector options from a route schema.
 
-    with _patch_picker_client():
-        result = await flow.async_step_route(
-            {**VALID_ROUTE_INPUT, CONF_DIRECTION_ID: "2"}
-        )
+    Args:
+        schema: The ``data_schema`` returned by ``async_step_route``.
 
-    assert result["type"] == FlowResultType.FORM
-    assert result["errors"][CONF_DIRECTION_ID] == "invalid_direction"
+    Returns:
+        The list of ``{"value": ..., "label": ...}`` dicts the direction
+        ``SelectSelector`` was built with.
+    """
+    for key in schema.schema:
+        if str(key) == CONF_DIRECTION_ID:
+            return list(schema.schema[key].config["options"])
+    raise AssertionError(f"{CONF_DIRECTION_ID} field not found in route schema")
 
 
-async def test_route_direction_id_non_integer_returns_error(
+async def test_route_direction_options_single_terminus(
     flow: TfiLiveConfigFlow,
 ) -> None:
-    """Direction_id='abc' (non-integer) returns invalid_direction error."""
+    """A direction with exactly one terminus renders "towards {terminus}"."""
     flow._config = _prefilled_config()
     flow._pending_stop_id = _STOP.stop_id
 
-    with _patch_picker_client():
-        result = await flow.async_step_route(
-            {**VALID_ROUTE_INPUT, CONF_DIRECTION_ID: "abc"}
-        )
+    with _patch_picker_client(
+        termini_by_direction={0: ["Broadstone"], 1: ["Parnell St"]}
+    ):
+        result = await flow.async_step_route(None)
 
-    assert result["type"] == FlowResultType.FORM
-    assert result["errors"][CONF_DIRECTION_ID] == "invalid_direction"
+    options = _direction_options(result["data_schema"])
+    assert options == [
+        {"value": "", "label": "Any direction"},
+        {"value": "0", "label": "towards Broadstone"},
+        {"value": "1", "label": "towards Parnell St"},
+    ]
+
+
+async def test_route_direction_options_branching_join(
+    flow: TfiLiveConfigFlow,
+) -> None:
+    """Multiple termini for one direction join with ' / '."""
+    flow._config = _prefilled_config()
+    flow._pending_stop_id = _STOP.stop_id
+
+    with _patch_picker_client(
+        termini_by_direction={0: ["Broadstone", "Parnell St"], 1: ["Heuston"]}
+    ):
+        result = await flow.async_step_route(None)
+
+    options = _direction_options(result["data_schema"])
+    assert options[1] == {"value": "0", "label": "towards Broadstone / Parnell St"}
+
+
+async def test_route_direction_options_merged_all_routes(
+    flow: TfiLiveConfigFlow,
+) -> None:
+    """Multiple routes narrowed to a stop still produce one merged direction label.
+
+    Direction and route are submitted on the same form, so the direction
+    labels can't react to which specific route the user is about to pick —
+    they're always resolved with route_id=None (merged across every route
+    serving the stop), which is exactly the "All routes at this stop" case.
+    """
+    flow._config = _prefilled_config()
+    flow._pending_stop_id = _STOP.stop_id
+    other_route = Route(route_id="OTHER_ID", route_short_name="99", agency_id="BE")
+
+    with _patch_picker_client(
+        routes_for_stop=[_ROUTE, other_route],
+        termini_by_direction={0: ["Broadstone", "Heuston"]},
+    ) as client:
+        result = await flow.async_step_route(None)
+
+    client.async_get_termini.assert_any_call(_STOP.stop_id, None, 0)
+    options = _direction_options(result["data_schema"])
+    assert options[1] == {"value": "0", "label": "towards Broadstone / Heuston"}
+
+
+async def test_route_direction_options_truncated_beyond_three(
+    flow: TfiLiveConfigFlow,
+) -> None:
+    """More than 3 termini truncate to 3 plus a '+N more' suffix."""
+    flow._config = _prefilled_config()
+    flow._pending_stop_id = _STOP.stop_id
+
+    with _patch_picker_client(
+        termini_by_direction={
+            0: ["Broadstone", "Parnell St", "Heuston", "Connolly", "Tara St"]
+        }
+    ):
+        result = await flow.async_step_route(None)
+
+    options = _direction_options(result["data_schema"])
+    assert options[1] == {
+        "value": "0",
+        "label": "towards Broadstone / Parnell St / Heuston +2 more",
+    }
+
+
+async def test_route_direction_options_lookup_failure_falls_back(
+    flow: TfiLiveConfigFlow,
+) -> None:
+    """A termini lookup failure degrades to plain numbered direction labels."""
+    flow._config = _prefilled_config()
+    flow._pending_stop_id = _STOP.stop_id
+
+    with _patch_picker_client(termini_side_effect=StaticGtfsLoadError("boom")):
+        result = await flow.async_step_route(None)
+
+    options = _direction_options(result["data_schema"])
+    assert options == [
+        {"value": "", "label": "Any direction"},
+        {"value": "0", "label": "Direction 0"},
+        {"value": "1", "label": "Direction 1"},
+    ]
+
+
+async def test_route_direction_options_no_termini_falls_back(
+    flow: TfiLiveConfigFlow,
+) -> None:
+    """A direction with no matching termini degrades to a plain numbered label.
+
+    Also covers the options-flow "stale stored direction_id" scenario from
+    the spec: there is no separate stale-direction mechanism, since any
+    direction that can't be resolved to a terminus renders the same
+    degraded label regardless of why the lookup came back empty.
+    """
+    flow._config = _prefilled_config()
+    flow._pending_stop_id = _STOP.stop_id
+
+    with _patch_picker_client(termini_by_direction={0: [], 1: ["Parnell St"]}):
+        result = await flow.async_step_route(None)
+
+    options = _direction_options(result["data_schema"])
+    assert options[1] == {"value": "0", "label": "Direction 0"}
+    assert options[2] == {"value": "1", "label": "towards Parnell St"}
+
+
+async def test_route_direction_options_static_gtfs_load_failure_falls_back(
+    flow: TfiLiveConfigFlow,
+) -> None:
+    """A static GTFS load failure still renders the 3-option direction selector."""
+    flow._config = _prefilled_config()
+    flow._pending_stop_id = _STOP.stop_id
+
+    with _patch_picker_client(load_side_effect=StaticGtfsLoadError("boom")):
+        result = await flow.async_step_route(None)
+
+    assert result["errors"]["base"] == "cannot_load_static_gtfs"
+    options = _direction_options(result["data_schema"])
+    assert options == [
+        {"value": "", "label": "Any direction"},
+        {"value": "0", "label": "Direction 0"},
+        {"value": "1", "label": "Direction 1"},
+    ]
 
 
 async def test_route_direction_id_0_accepted(flow: TfiLiveConfigFlow) -> None:
@@ -1562,42 +1710,47 @@ async def test_options_flow_sensor_menu_step_renders_menu(
     assert result["menu_options"] == ["add_another", "finish"]
 
 
-async def test_options_flow_direction_id_invalid(
+async def test_options_flow_direction_options_single_terminus(
     options_flow: TfiLiveOptionsFlowHandler,
 ) -> None:
-    """Issue #34: options flow direction_id='2' returns invalid_direction error."""
+    """Options flow: a direction with one terminus renders "towards {terminus}".
+
+    Also covers the spec's options-flow "stale stored direction_id" case:
+    there is no separate stale-direction mechanism, since the options flow
+    only ever adds new sensors (no editing of an existing direction_id), so
+    the same lookup-result-driven label building already used for the
+    add-flow applies unchanged here.
+    """
     options_flow._pending_stop_id = _STOP.stop_id
-    with _patch_picker_client():
-        result = await options_flow.async_step_route(
-            {
-                "name": "Bus",
-                CONF_ROUTE_ID: _ROUTE.route_id,
-                CONF_DIRECTION_ID: "2",
-                "operator_id": "",
-            }
-        )
 
-    assert result["type"] == FlowResultType.FORM
-    assert result["errors"].get(CONF_DIRECTION_ID) == "invalid_direction"
+    with _patch_picker_client(
+        termini_by_direction={0: ["Broadstone"], 1: ["Parnell St"]}
+    ):
+        result = await options_flow.async_step_route(None)
+
+    options = _direction_options(result["data_schema"])
+    assert options == [
+        {"value": "", "label": "Any direction"},
+        {"value": "0", "label": "towards Broadstone"},
+        {"value": "1", "label": "towards Parnell St"},
+    ]
 
 
-async def test_options_flow_direction_id_non_integer(
+async def test_options_flow_direction_options_lookup_failure_falls_back(
     options_flow: TfiLiveOptionsFlowHandler,
 ) -> None:
-    """Issue #34: options flow direction_id='abc' returns invalid_direction error."""
+    """Options flow: a termini lookup failure falls back to numbered labels."""
     options_flow._pending_stop_id = _STOP.stop_id
-    with _patch_picker_client():
-        result = await options_flow.async_step_route(
-            {
-                "name": "Bus",
-                CONF_ROUTE_ID: _ROUTE.route_id,
-                CONF_DIRECTION_ID: "abc",
-                "operator_id": "",
-            }
-        )
 
-    assert result["type"] == FlowResultType.FORM
-    assert result["errors"].get(CONF_DIRECTION_ID) == "invalid_direction"
+    with _patch_picker_client(termini_side_effect=StaticGtfsLoadError("boom")):
+        result = await options_flow.async_step_route(None)
+
+    options = _direction_options(result["data_schema"])
+    assert options == [
+        {"value": "", "label": "Any direction"},
+        {"value": "0", "label": "Direction 0"},
+        {"value": "1", "label": "Direction 1"},
+    ]
 
 
 async def test_options_flow_stop_load_failure_shows_error(
@@ -1704,6 +1857,7 @@ async def test_options_flow_picker_client_loaded_once_and_reused(
         client.async_load = AsyncMock()
         client.list_stops = MagicMock(return_value=[_STOP])
         client.async_get_routes_for_stop = AsyncMock(return_value=[_ROUTE])
+        client.async_get_termini = AsyncMock(return_value=[])
         mock_cls.return_value = client
 
         await options_flow.async_step_stop(None)

@@ -212,6 +212,76 @@ def _build_route_options(
     ]
 
 
+def _direction_label(direction_id: int, termini: list[str]) -> str:
+    """Build the direction dropdown label for one direction_id.
+
+    Args:
+        direction_id: The GTFS direction (``0`` or ``1``) the label is for.
+        termini: Distinct terminus stop names for this direction, already
+            sorted; empty when the lookup failed or found nothing.
+
+    Returns:
+        ``"towards {termini}"``, joining multiple termini with ``" / "``
+        and truncating to the first 3 with a ``" +N more"`` suffix beyond
+        that, when ``termini`` is non-empty. Otherwise a plain
+        ``"Direction {direction_id}"`` fallback label.
+    """
+    if not termini:
+        return f"Direction {direction_id}"
+    shown = " / ".join(termini[:3])
+    suffix = f" +{len(termini) - 3} more" if len(termini) > 3 else ""
+    return f"towards {shown}{suffix}"
+
+
+async def _build_direction_options(
+    client: StaticGtfsPickerClient | None, stop_id: str
+) -> list[SelectOptionDict]:
+    """Build select options for the direction-picker field.
+
+    Termini are always resolved across every route serving ``stop_id``
+    (``route_id=None``) rather than the specific route the user is about to
+    pick, since both fields are submitted together on the same form and the
+    route choice isn't known yet when this is rendered. This naturally
+    collapses to a single route's termini when only one route serves the
+    stop, and merges/deduplicates across routes otherwise. A known
+    trade-off: at a stop served by several routes, picking one specific
+    route (rather than "All routes at this stop") still shows the label
+    merged across every route at the stop, not narrowed to the picked one —
+    unavoidable without splitting route and direction into separate steps,
+    which is out of scope here.
+
+    Args:
+        client: The loaded picker client to query termini with, or ``None``
+            when the static GTFS feed failed to load — both real directions
+            then degrade to plain numbered labels.
+        stop_id: The picked stop to resolve termini for.
+
+    Returns:
+        Exactly three select options: "Any direction" (value ``""``,
+        pinned first), then direction 0 and direction 1 (values ``"0"``
+        and ``"1"``), each labelled with real terminus names when
+        available or a plain numbered fallback otherwise.
+    """
+    labels = {0: "Direction 0", 1: "Direction 1"}
+    if client is not None:
+        for direction_id in (0, 1):
+            try:
+                termini = await client.async_get_termini(stop_id, None, direction_id)
+            except StaticGtfsLoadError as exc:
+                _LOGGER.warning(
+                    "Static GTFS termini lookup failed for direction %s: %s",
+                    direction_id,
+                    exc,
+                )
+                termini = []
+            labels[direction_id] = _direction_label(direction_id, termini)
+    return [
+        SelectOptionDict(value="", label="Any direction"),
+        SelectOptionDict(value="0", label=labels[0]),
+        SelectOptionDict(value="1", label=labels[1]),
+    ]
+
+
 class _SensorPickerFlow:
     """Shared stop/route picker steps used by both the config and options flows.
 
@@ -349,21 +419,15 @@ class _SensorPickerFlow:
         if user_input is not None:
             name: str = user_input.get(_SENSOR_NAME_KEY, "").strip()
             route_id_raw: str = user_input[CONF_ROUTE_ID]
-            direction_id_raw: str = user_input.get(CONF_DIRECTION_ID, "").strip()
+            direction_id_raw: str = user_input.get(CONF_DIRECTION_ID, "")
             operator_id: str = user_input.get(CONF_OPERATOR_ID, "").strip()
 
             if not name:
                 errors[_SENSOR_NAME_KEY] = "required"
 
-            direction_id: int | None = None
-            if direction_id_raw:
-                try:
-                    direction_id = int(direction_id_raw)
-                    if direction_id not in (0, 1):
-                        errors[CONF_DIRECTION_ID] = "invalid_direction"
-                        direction_id = None
-                except ValueError:
-                    errors[CONF_DIRECTION_ID] = "invalid_direction"
+            direction_id: int | None = (
+                int(direction_id_raw) if direction_id_raw else None
+            )
 
             if not errors:
                 route_id: str | None = (
@@ -383,16 +447,20 @@ class _SensorPickerFlow:
 
         routes: list[Route] = []
         show_agency = False
+        picker_client: StaticGtfsPickerClient | None = None
         try:
-            client = await self._get_picker_client()
-            routes = await client.async_get_routes_for_stop(stop_id)
+            picker_client = await self._get_picker_client()
+            routes = await picker_client.async_get_routes_for_stop(stop_id)
             if not routes:
-                routes = client.list_routes()
+                routes = picker_client.list_routes()
                 show_agency = True
                 errors["base"] = "route_list_not_narrowed"
         except StaticGtfsLoadError as exc:
             _LOGGER.warning("Static GTFS picker load failed: %s", exc)
             errors["base"] = "cannot_load_static_gtfs"
+            picker_client = None
+
+        direction_options = await _build_direction_options(picker_client, stop_id)
 
         schema = vol.Schema(
             {
@@ -403,7 +471,12 @@ class _SensorPickerFlow:
                     )
                 ),
                 vol.Required(_SENSOR_NAME_KEY): str,
-                vol.Optional(CONF_DIRECTION_ID, default=""): str,
+                vol.Optional(CONF_DIRECTION_ID, default=""): SelectSelector(
+                    SelectSelectorConfig(
+                        options=direction_options,
+                        mode=SelectSelectorMode.DROPDOWN,
+                    )
+                ),
                 vol.Optional(CONF_OPERATOR_ID, default=""): str,
             }
         )

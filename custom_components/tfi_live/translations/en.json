@@ -24,7 +24,7 @@
         "data": {
           "route_id": "Route",
           "name": "Sensor Name",
-          "direction_id": "Direction (0 or 1, leave blank for both)",
+          "direction_id": "Direction",
           "operator_id": "Operator ID (optional)"
         }
       },
@@ -57,7 +57,6 @@
     "error": {
       "required": "This field is required.",
       "invalid_url": "Please enter a valid URL including scheme (https://).",
-      "invalid_direction": "Direction must be 0 or 1.",
       "invalid_num_departures": "Enter a whole number between 1 and 10.",
       "cannot_connect": "Unable to connect to the NTA feed.",
       "cannot_parse": "The feed responded but is not a GTFS-RT protobuf feed — remove any format=json parameter from the URL.",
@@ -86,7 +85,7 @@
         "data": {
           "route_id": "Route",
           "name": "Sensor Name",
-          "direction_id": "Direction (0 or 1, leave blank for both)",
+          "direction_id": "Direction",
           "operator_id": "Operator ID (optional)"
         }
       },
@@ -101,7 +100,6 @@
     },
     "error": {
       "required": "This field is required.",
-      "invalid_direction": "Direction must be 0 or 1.",
       "cannot_load_static_gtfs": "Couldn't reach the static GTFS feed to load stops and routes — try again shortly.",
       "route_list_not_narrowed": "No routes found linked to this stop in the schedule — showing the full nationwide route list with operator shown instead."
     }
