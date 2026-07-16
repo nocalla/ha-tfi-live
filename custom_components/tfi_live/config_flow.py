@@ -65,6 +65,12 @@ _MENU_FINISH = "finish"
 
 _ALL_ROUTES_LABEL = "All routes at this stop"
 
+# Hassfest forbids raw URLs in strings.json descriptions; these are passed
+# as description_placeholders instead and referenced as {nta_portal_url}/
+# {readme_url} in the translation strings.
+_NTA_PORTAL_URL = "https://developer.nationaltransport.ie"
+_README_URL = "https://github.com/nocalla/ha-tfi-live"
+
 
 def _url_validator(value: str) -> str:
     """Validate that a string is a parseable URL with scheme and host.
@@ -395,6 +401,9 @@ class _SensorPickerFlow:
             step_id="stop",
             data_schema=schema,
             errors=errors,
+            description_placeholders={
+                "readme_url": f"{_README_URL}#step-2--add-a-sensor"
+            },
         )
 
     async def async_step_route(
@@ -493,6 +502,9 @@ class _SensorPickerFlow:
             step_id="route",
             data_schema=schema,
             errors=errors,
+            description_placeholders={
+                "readme_url": f"{_README_URL}#step-2--add-a-sensor"
+            },
         )
 
     async def async_step_sensor_menu(
@@ -684,6 +696,10 @@ class TfiLiveConfigFlow(_SensorPickerFlow, config_entries.ConfigFlow, domain=DOM
             step_id="user",
             data_schema=schema,
             errors=errors,
+            description_placeholders={
+                "nta_portal_url": _NTA_PORTAL_URL,
+                "readme_url": f"{_README_URL}#step-1--integration-settings",
+            },
         )
 
     async def async_step_finish(
@@ -759,6 +775,10 @@ class TfiLiveConfigFlow(_SensorPickerFlow, config_entries.ConfigFlow, domain=DOM
             step_id="reauth_confirm",
             data_schema=schema,
             errors=errors,
+            description_placeholders={
+                "nta_portal_url": _NTA_PORTAL_URL,
+                "readme_url": f"{_README_URL}#re-authentication",
+            },
         )
 
     async def async_step_reconfigure(
@@ -855,6 +875,10 @@ class TfiLiveConfigFlow(_SensorPickerFlow, config_entries.ConfigFlow, domain=DOM
             step_id="reconfigure",
             data_schema=schema,
             errors=errors,
+            description_placeholders={
+                "nta_portal_url": _NTA_PORTAL_URL,
+                "readme_url": f"{_README_URL}#reconfiguration",
+            },
         )
 
 
