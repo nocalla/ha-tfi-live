@@ -1,9 +1,9 @@
 # HA TFI Live
 
 [![CI](https://github.com/nocalla/ha-tfi-live/actions/workflows/ci.yml/badge.svg)](https://github.com/nocalla/ha-tfi-live/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/badge/release-v0.3.4-blue)](https://github.com/nocalla/ha-tfi-live/releases)
+[![Release](https://img.shields.io/github/v/release/nocalla/ha-tfi-live?color=blue)](https://github.com/nocalla/ha-tfi-live/releases)
 [![License](https://img.shields.io/badge/license-MIT-green)](https://github.com/nocalla/ha-tfi-live/blob/main/LICENSE)
-[![Coverage](https://img.shields.io/badge/coverage-99%25-brightgreen)](https://github.com/nocalla/ha-tfi-live/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/nocalla/ha-tfi-live/main/.github/badges/coverage.json)](https://github.com/nocalla/ha-tfi-live/actions/workflows/ci.yml)
 [![HACS: Custom Repository](https://img.shields.io/badge/HACS-Custom%20Repository-orange.svg)](https://hacs.xyz/docs/faq/custom_repositories/)
 [![HA: 2024.1+](https://img.shields.io/badge/Home%20Assistant-2024.1%2B-41bdf5.svg)](https://www.home-assistant.io)
 [![Python: 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)](https://github.com/nocalla/ha-tfi-live/blob/main/pyproject.toml)
@@ -82,6 +82,7 @@ To remove the integration:
 3. Re-adding the integration later will restore your sensors from the configuration you enter during setup.
 
 For **manual installs**: delete the `custom_components/tfi_live/` directory from your HA config directory and restart Home Assistant.
+
 ## Entity Model
 
 **State:** Integer minutes to the next departure (truncated toward zero). `None` when no upcoming service is found or when the feed has not been updated within the last 3 minutes.
@@ -123,6 +124,43 @@ automation:
         data:
           message: "Next 46A in {{ states('sensor.next_46a_ranelagh') }} minutes"
 ```
+
+## Dashboard Examples
+
+### Template sensor — next due route
+
+If you have a stop-wide sensor (no `route_id` configured, so it reports the next departure of any route from that stop), the sensor state is just minutes — the route itself lives in the `departures` attribute. This template sensor combines them into a single human-readable string:
+
+```yaml
+template:
+  - sensor:
+      - name: "Next Due at Ranelagh"
+        state: >
+          {% set departures = state_attr('sensor.next_departure_ranelagh', 'departures') %}
+          {% if departures %}
+            {{ departures[0].route_name }} in {{ states('sensor.next_departure_ranelagh') }} min
+          {% else %}
+            No upcoming service
+          {% endif %}
+        icon: mdi:bus-clock
+```
+
+### Card — next 3 departures from a stop
+
+A Markdown card that lists the `departures` attribute in full, including real-time delay:
+
+```yaml
+type: markdown
+title: Next Departures
+content: >
+  {% for dep in state_attr('sensor.next_departure_ranelagh', 'departures') %}
+  **{{ dep.route_name }}** — {{ dep.realtime_time or dep.scheduled_time }}
+  {%- if dep.delay_minutes %} ({{ dep.delay_minutes }} min late){% endif %}
+
+  {% endfor %}
+```
+
+Replace `sensor.next_departure_ranelagh` with your own sensor's entity ID in both examples.
 
 ## Data Updates
 
