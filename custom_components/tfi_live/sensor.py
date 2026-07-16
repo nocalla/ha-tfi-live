@@ -253,6 +253,57 @@ class TfiLiveSensor(CoordinatorEntity[TfiLiveCoordinator], SensorEntity):
             ),
         }
 
+    def _carry_forward_delay(self, entity: dict[str, Any], trip_id: str) -> int | None:
+        """Find the nearest preceding stop's delay when our stop is unlisted.
+
+        TFI's RT feed sometimes omits our configured stop from a tracked
+        trip's ``stop_time_updates`` even while reporting live delay at
+        neighboring stops. Per the GTFS-RT spec, an unlisted stop inherits
+        the last preceding stop's delay, so this walks the entity's updates
+        in feed order (GTFS-RT requires these sorted by ``stop_sequence``)
+        and returns the delay from the closest stop at or before our stop's
+        position in the trip's static stop pattern.
+
+        Args:
+            entity: A coordinator trip-update entity dict, containing
+                ``stop_time_updates``.
+            trip_id: GTFS trip ID the entity belongs to.
+
+        Returns:
+            The carried-forward delay in seconds, or ``None`` if the trip's
+            static stop pattern is unavailable, our stop isn't in it, or no
+            preceding update in the feed carries an explicit delay.
+        """
+        static_stops = self.coordinator.cache.get_trip_stops(trip_id)
+        if not static_stops:
+            return None
+
+        target_seq: int | None = None
+        seq_by_stop: dict[str, int] = {}
+        for seq, stop_id in static_stops:
+            seq_by_stop[stop_id] = seq
+            if stop_id == self._stop_id:
+                target_seq = seq
+        if target_seq is None:
+            return None
+
+        carried_delay: int | None = None
+        for stu in entity["stop_time_updates"]:
+            mapped_seq = seq_by_stop.get(stu["stop_id"])
+            if mapped_seq is None:
+                continue
+            if mapped_seq > target_seq:
+                break
+            delay = (
+                stu["departure_delay"]
+                if stu["departure_delay"] is not None
+                else stu["arrival_delay"]
+            )
+            if delay is not None:
+                carried_delay = delay
+
+        return carried_delay
+
     def _get_departures(self) -> list[dict[str, Any]]:
         """Merge real-time and scheduled departures into a sorted, filtered list.
 
@@ -314,9 +365,11 @@ class TfiLiveSensor(CoordinatorEntity[TfiLiveCoordinator], SensorEntity):
                 continue
             # operator_id (agency_id) is not present in coordinator data; skip filter.
             trip_id = entity["trip_id"]
+            exact_match = False
             for stu in entity["stop_time_updates"]:
                 if stu["stop_id"] != self._stop_id:
                     continue
+                exact_match = True
                 # Prefer departure over arrival, keeping each event's time
                 # paired with its own delay.
                 if stu["departure_time"] is not None:
@@ -357,6 +410,24 @@ class TfiLiveSensor(CoordinatorEntity[TfiLiveCoordinator], SensorEntity):
                 }
                 # Only store the first matching stop_time_update per trip.
                 break
+
+            if exact_match or trip_id not in static_by_trip:
+                continue
+
+            # TFI's RT feed routinely omits our stop from a tracked trip's
+            # update list even while reporting live delay at neighboring
+            # stops. Per the GTFS-RT spec (and TFI's own app), an unlisted
+            # stop inherits the last preceding stop's delay.
+            carried_delay = self._carry_forward_delay(entity, trip_id)
+            if carried_delay is None:
+                continue
+
+            fallback_sched_hhmm, _ = static_by_trip[trip_id]
+            rt_by_trip[trip_id] = {
+                "_dt": _parse_hhmm_today(fallback_sched_hhmm)
+                + timedelta(seconds=carried_delay),
+                "_delay": carried_delay,
+            }
 
         candidates: list[dict[str, Any]] = []
 

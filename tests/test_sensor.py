@@ -49,6 +49,7 @@ def mock_coordinator():
     coord._cache = MagicMock()
     coord.cache = coord._cache
     coord._cache.get_scheduled_departures.return_value = []
+    coord._cache.get_trip_stops.return_value = []
     return coord
 
 
@@ -862,6 +863,121 @@ def test_get_departures_delay_only_falls_back_to_static_plus_delay(
         now_dublin.year, now_dublin.month, now_dublin.day, future.hour, future.minute
     ) + timedelta(seconds=481)
     assert dep["realtime_time"] == expected_dt.strftime("%H:%M")
+
+
+def test_get_departures_carries_forward_delay_when_stop_skipped(
+    mock_coordinator, sensor_config
+):
+    """A trip whose RT feed skips our stop's exact update carries the delay forward.
+
+    Regression guard for #127 (built from the #119 captured production
+    trace): TFI's GTFS-RT feed routinely omits our configured stop from a
+    tracked trip's stop_time_updates list even while reporting live delay at
+    an earlier stop. Per GTFS-RT, the unlisted stop inherits the last
+    preceding stop's delay — this must surface as realtime_time, not null.
+    """
+    from zoneinfo import ZoneInfo
+
+    # Static pattern: STOP_X (seq 1) -> STOP_A (seq 2, our target) -> STOP_Y (seq 3).
+    mock_coordinator._cache.get_trip_stops.return_value = [
+        (1, "STOP_X"),
+        (2, "STOP_A"),
+        (3, "STOP_Y"),
+    ]
+    mock_coordinator.data = {
+        "entities": [
+            {
+                "trip_id": "TRIP_A",
+                "route_id": "46A",
+                "direction_id": None,
+                "start_date": "20260517",
+                "stop_time_updates": [
+                    {
+                        "stop_id": "STOP_X",
+                        "arrival_time": None,
+                        "departure_time": None,
+                        "arrival_delay": 120,
+                        "departure_delay": 120,
+                    },
+                    # STOP_A is missing entirely — the feed jumps straight
+                    # past it to STOP_Y.
+                    {
+                        "stop_id": "STOP_Y",
+                        "arrival_time": None,
+                        "departure_time": None,
+                        "arrival_delay": 300,
+                        "departure_delay": 300,
+                    },
+                ],
+            }
+        ]
+    }
+    now_dublin = datetime.now(ZoneInfo("Europe/Dublin"))
+    future = now_dublin + timedelta(minutes=10)
+    mock_coordinator._cache.get_scheduled_departures.return_value = [
+        ("TRIP_A", future.strftime("%H:%M"), "46A Route Name")
+    ]
+    s = TfiLiveSensor(mock_coordinator, sensor_config, "e1")
+    deps = s._get_departures()
+
+    assert len(deps) == 1
+    dep = deps[0]
+    expected_dt = datetime(
+        now_dublin.year, now_dublin.month, now_dublin.day, future.hour, future.minute
+    ) + timedelta(seconds=120)
+    assert dep["realtime_time"] == expected_dt.strftime("%H:%M")
+    assert dep["delay_minutes"] == round(120 / 60)
+
+
+def test_get_departures_no_carry_forward_when_no_preceding_stop(
+    mock_coordinator, sensor_config
+):
+    """If the RT feed only lists stops after ours, it stays schedule-only.
+
+    Negative case for #127: the vehicle hasn't reported that far into the
+    trip yet, so there is no preceding delay to carry forward — the
+    departure must remain unchanged (realtime_time null).
+    """
+    from zoneinfo import ZoneInfo
+
+    mock_coordinator._cache.get_trip_stops.return_value = [
+        (1, "STOP_X"),
+        (2, "STOP_A"),
+        (3, "STOP_Y"),
+    ]
+    mock_coordinator.data = {
+        "entities": [
+            {
+                "trip_id": "TRIP_A",
+                "route_id": "46A",
+                "direction_id": None,
+                "start_date": "20260517",
+                "stop_time_updates": [
+                    # Only a stop after ours is reported.
+                    {
+                        "stop_id": "STOP_Y",
+                        "arrival_time": None,
+                        "departure_time": None,
+                        "arrival_delay": 300,
+                        "departure_delay": 300,
+                    },
+                ],
+            }
+        ]
+    }
+    now_dublin = datetime.now(ZoneInfo("Europe/Dublin"))
+    future = now_dublin + timedelta(minutes=10)
+    mock_coordinator._cache.get_scheduled_departures.return_value = [
+        ("TRIP_A", future.strftime("%H:%M"), "46A Route Name")
+    ]
+    s = TfiLiveSensor(mock_coordinator, sensor_config, "e1")
+    deps = s._get_departures()
+
+    assert len(deps) == 1
+    dep = deps[0]
+    assert dep["realtime_time"] is None
+    assert dep["delay_minutes"] is None
+    assert dep["scheduled_time"] == future.strftime("%H:%M")
 
 
 def test_get_departures_rt_trip_enriched_from_static(mock_coordinator, sensor_config):
