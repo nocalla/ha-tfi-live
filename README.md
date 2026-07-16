@@ -1,9 +1,9 @@
 # HA TFI Live
 
 [![CI](https://github.com/nocalla/ha-tfi-live/actions/workflows/ci.yml/badge.svg)](https://github.com/nocalla/ha-tfi-live/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/badge/release-v0.3.4-blue)](https://github.com/nocalla/ha-tfi-live/releases)
+[![Release](https://img.shields.io/github/v/release/nocalla/ha-tfi-live?color=blue)](https://github.com/nocalla/ha-tfi-live/releases)
 [![License](https://img.shields.io/badge/license-MIT-green)](https://github.com/nocalla/ha-tfi-live/blob/main/LICENSE)
-[![Coverage](https://img.shields.io/badge/coverage-99%25-brightgreen)](https://github.com/nocalla/ha-tfi-live/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/nocalla/ha-tfi-live/main/.github/badges/coverage.json)](https://github.com/nocalla/ha-tfi-live/actions/workflows/ci.yml)
 [![HACS: Custom Repository](https://img.shields.io/badge/HACS-Custom%20Repository-orange.svg)](https://hacs.xyz/docs/faq/custom_repositories/)
 [![HA: 2024.1+](https://img.shields.io/badge/Home%20Assistant-2024.1%2B-41bdf5.svg)](https://www.home-assistant.io)
 [![Python: 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)](https://github.com/nocalla/ha-tfi-live/blob/main/pyproject.toml)
@@ -82,6 +82,7 @@ To remove the integration:
 3. Re-adding the integration later will restore your sensors from the configuration you enter during setup.
 
 For **manual installs**: delete the `custom_components/tfi_live/` directory from your HA config directory and restart Home Assistant.
+
 ## Entity Model
 
 **State:** Integer minutes to the next departure (truncated toward zero). `None` when no upcoming service is found or when the feed has not been updated within the last 3 minutes.
