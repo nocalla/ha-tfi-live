@@ -821,6 +821,7 @@ def test_get_departures_delay_only_falls_back_to_static_plus_delay(
     though the feed genuinely had data for the stop/trip.
     """
     from datetime import timedelta
+    from zoneinfo import ZoneInfo
 
     mock_coordinator.data = {
         "entities": [
@@ -841,7 +842,12 @@ def test_get_departures_delay_only_falls_back_to_static_plus_delay(
             }
         ]
     }
-    future = datetime.now() + timedelta(minutes=10)
+    # The sensor interprets the static HH:MM as Dublin-local wall time
+    # (_parse_hhmm_today), so the mock must be built in that timezone —
+    # not system-local — to avoid drifting outside the grace window on
+    # CI runners whose local timezone isn't Europe/Dublin.
+    now_dublin = datetime.now(ZoneInfo("Europe/Dublin"))
+    future = now_dublin + timedelta(minutes=10)
     mock_coordinator._cache.get_scheduled_departures.return_value = [
         ("TRIP_A", future.strftime("%H:%M"), "46A Route Name")
     ]
@@ -853,7 +859,7 @@ def test_get_departures_delay_only_falls_back_to_static_plus_delay(
     assert dep["realtime_time"] is not None
     assert dep["delay_minutes"] == round(481 / 60)
     expected_dt = datetime(
-        future.year, future.month, future.day, future.hour, future.minute
+        now_dublin.year, now_dublin.month, now_dublin.day, future.hour, future.minute
     ) + timedelta(seconds=481)
     assert dep["realtime_time"] == expected_dt.strftime("%H:%M")
 
