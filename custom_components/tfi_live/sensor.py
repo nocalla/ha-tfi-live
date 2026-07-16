@@ -285,56 +285,10 @@ class TfiLiveSensor(CoordinatorEntity[TfiLiveCoordinator], SensorEntity):
             str(self._direction_id) if self._direction_id is not None else None
         )
 
-        rt_by_trip: dict[str, dict[str, Any]] = {}
-        for entity in entities:
-            if self._route_id is not None and entity["route_id"] != self._route_id:
-                continue
-            if (
-                direction_filter is not None
-                and entity["direction_id"] != direction_filter
-            ):
-                continue
-            # operator_id (agency_id) is not present in coordinator data; skip filter.
-            trip_id: str = entity["trip_id"]
-            for stu in entity["stop_time_updates"]:
-                if stu["stop_id"] != self._stop_id:
-                    continue
-                # Prefer departure_time over arrival_time for the effective RT time.
-                unix_ts: int | None = stu["departure_time"] or stu["arrival_time"]
-                if unix_ts is None:
-                    continue
-                delay: int | None = stu["departure_delay"]
-                rt_by_trip[trip_id] = {
-                    "_unix_ts": unix_ts,
-                    "_delay": delay,
-                }
-                # Only store the first matching stop_time_update per trip.
-                break
-
-        if _logger.isEnabledFor(logging.DEBUG):
-            all_stop_ids = {
-                stu["stop_id"]
-                for entity in entities
-                for stu in entity["stop_time_updates"]
-            }
-            near_miss = sorted(
-                sid for sid in all_stop_ids if sid.startswith(self._stop_id[:6])
-            )[:10]
-            _logger.debug(
-                "[TEMP-DEBUG] RT scan for stop_id=%s route_id=%s: %d feed "
-                "entities, matched %d trip(s) for this stop; %d distinct "
-                "stop_ids seen across the whole feed; near-miss stop_ids "
-                "sharing prefix %r: %s",
-                self._stop_id,
-                self._route_id,
-                len(entities),
-                len(rt_by_trip),
-                len(all_stop_ids),
-                self._stop_id[:6],
-                near_miss,
-            )
-
-        # Fetch scheduled departures from static cache.
+        # Fetch scheduled departures from static cache first — the RT loop
+        # below needs each trip's scheduled time to derive an effective time
+        # for delay-only stop_time_updates (entries that carry a delay but no
+        # absolute arrival/departure epoch; TFI's feed does this routinely).
         static_departures = self.coordinator.cache.get_scheduled_departures(
             self._stop_id,
             self._route_id,
@@ -349,31 +303,68 @@ class TfiLiveSensor(CoordinatorEntity[TfiLiveCoordinator], SensorEntity):
             for trip_id, sched_time, route_name in static_departures
         }
 
-        if _logger.isEnabledFor(logging.DEBUG):
-            static_trip_ids = set(static_by_trip)
-            rt_trip_ids = set(rt_by_trip)
-            _logger.debug(
-                "[TEMP-DEBUG] RT/static trip_id overlap for stop_id=%s: %d "
-                "static trip(s), %d RT trip(s) for this stop, %d "
-                "overlapping; static-only sample: %s; RT-only sample: %s",
-                self._stop_id,
-                len(static_trip_ids),
-                len(rt_trip_ids),
-                len(static_trip_ids & rt_trip_ids),
-                sorted(static_trip_ids - rt_trip_ids)[:5],
-                sorted(rt_trip_ids - static_trip_ids)[:5],
-            )
+        rt_by_trip: dict[str, dict[str, Any]] = {}
+        for entity in entities:
+            if self._route_id is not None and entity["route_id"] != self._route_id:
+                continue
+            if (
+                direction_filter is not None
+                and entity["direction_id"] != direction_filter
+            ):
+                continue
+            # operator_id (agency_id) is not present in coordinator data; skip filter.
+            trip_id = entity["trip_id"]
+            for stu in entity["stop_time_updates"]:
+                if stu["stop_id"] != self._stop_id:
+                    continue
+                # Prefer departure over arrival, keeping each event's time
+                # paired with its own delay.
+                if stu["departure_time"] is not None:
+                    unix_ts: int | None = stu["departure_time"]
+                    delay: int | None = stu["departure_delay"]
+                elif stu["arrival_time"] is not None:
+                    unix_ts = stu["arrival_time"]
+                    delay = stu["arrival_delay"]
+                else:
+                    unix_ts = None
+                    delay = (
+                        stu["departure_delay"]
+                        if stu["departure_delay"] is not None
+                        else stu["arrival_delay"]
+                    )
+
+                rt_dt: datetime | None
+                if unix_ts is not None:
+                    rt_dt = datetime.fromtimestamp(unix_ts, tz=_DUBLIN_TZ).replace(
+                        tzinfo=None
+                    )
+                elif delay is not None and trip_id in static_by_trip:
+                    # No absolute time in the feed for this stop — fall back
+                    # to the static schedule offset by the reported delay.
+                    fallback_sched_hhmm, _ = static_by_trip[trip_id]
+                    rt_dt = _parse_hhmm_today(fallback_sched_hhmm) + timedelta(
+                        seconds=delay
+                    )
+                else:
+                    rt_dt = None
+
+                if rt_dt is None:
+                    continue
+
+                rt_by_trip[trip_id] = {
+                    "_dt": rt_dt,
+                    "_delay": delay,
+                }
+                # Only store the first matching stop_time_update per trip.
+                break
 
         candidates: list[dict[str, Any]] = []
 
         # Process RT departures.
         for trip_id, rt_info in rt_by_trip.items():
-            rt_unix_ts: int = rt_info["_unix_ts"]
+            rt_dt = rt_info["_dt"]
             rt_delay: int | None = rt_info["_delay"]
 
-            rt_dt = datetime.fromtimestamp(rt_unix_ts, tz=_DUBLIN_TZ).replace(
-                tzinfo=None
-            )
             rt_hhmm = rt_dt.strftime("%H:%M")
 
             sched_hhmm: str | None = None

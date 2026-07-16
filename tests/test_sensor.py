@@ -810,6 +810,54 @@ def test_get_departures_skips_null_unix_ts(mock_coordinator, sensor_config):
     assert s._get_departures() == []
 
 
+def test_get_departures_delay_only_falls_back_to_static_plus_delay(
+    mock_coordinator, sensor_config
+):
+    """A stop_time_update with a delay but no absolute time still surfaces RT info.
+
+    Regression guard for #119: TFI's GTFS-RT feed frequently reports a delay
+    without an absolute arrival/departure epoch. Previously this caused the
+    whole RT match to be dropped, so realtime_time was always null even
+    though the feed genuinely had data for the stop/trip.
+    """
+    from datetime import timedelta
+
+    mock_coordinator.data = {
+        "entities": [
+            {
+                "trip_id": "TRIP_A",
+                "route_id": "46A",
+                "direction_id": None,
+                "start_date": "20260517",
+                "stop_time_updates": [
+                    {
+                        "stop_id": "STOP_A",
+                        "arrival_time": None,
+                        "departure_time": None,
+                        "arrival_delay": 481,
+                        "departure_delay": 481,
+                    }
+                ],
+            }
+        ]
+    }
+    future = datetime.now() + timedelta(minutes=10)
+    mock_coordinator._cache.get_scheduled_departures.return_value = [
+        ("TRIP_A", future.strftime("%H:%M"), "46A Route Name")
+    ]
+    s = TfiLiveSensor(mock_coordinator, sensor_config, "e1")
+    deps = s._get_departures()
+
+    assert len(deps) == 1
+    dep = deps[0]
+    assert dep["realtime_time"] is not None
+    assert dep["delay_minutes"] == round(481 / 60)
+    expected_dt = datetime(
+        future.year, future.month, future.day, future.hour, future.minute
+    ) + timedelta(seconds=481)
+    assert dep["realtime_time"] == expected_dt.strftime("%H:%M")
+
+
 def test_get_departures_rt_trip_enriched_from_static(mock_coordinator, sensor_config):
     """RT departure is enriched with sched_time and route_name from static data."""
     from datetime import timedelta
