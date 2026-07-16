@@ -15,3 +15,4 @@ Per [CONTRIBUTING.md](../CONTRIBUTING.md):
 - [ ] Tests added or updated for the change
 - [ ] Commits follow [Conventional Commits](https://www.conventionalcommits.org/)
 - [ ] No GTFS fetch/parse logic added here — that belongs in [`nta-gtfs`](https://github.com/nocalla/python-nta-gtfs)
+- [ ] If this PR should cut a release on merge, it's labelled `release: patch`, `release: minor`, or `release: major` (see [CONTRIBUTING.md](../CONTRIBUTING.md#maintainer-guide-cutting-a-release))
