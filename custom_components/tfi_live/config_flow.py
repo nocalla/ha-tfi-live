@@ -65,6 +65,12 @@ _MENU_FINISH = "finish"
 
 _ALL_ROUTES_LABEL = "All routes at this stop"
 
+# Hassfest forbids raw URLs in strings.json descriptions; these are passed
+# as description_placeholders instead and referenced as {nta_portal_url}/
+# {readme_url} in the translation strings.
+_NTA_PORTAL_URL = "https://developer.nationaltransport.ie"
+_README_URL = "https://github.com/nocalla/ha-tfi-live"
+
 
 def _url_validator(value: str) -> str:
     """Validate that a string is a parseable URL with scheme and host.
@@ -345,10 +351,15 @@ class _SensorPickerFlow:
     ) -> ConfigFlowResult:
         """Handle the stop-search step of the sensor picker.
 
-        Presents a searchable dropdown of every stop in the static GTFS
-        feed, keyed by real ``stop_id`` but labelled with the rider-facing
-        stop code and name. On submission, stores the picked stop and
-        advances to :meth:`async_step_route`.
+        Presents a searchable, virtualized picker (``custom_value=True``
+        opts the field into HA frontend's ``ha-generic-picker`` component
+        instead of the plain unwindowed dropdown) of every stop in the
+        static GTFS feed, keyed by real ``stop_id`` but labelled with the
+        rider-facing stop code and name. ``custom_value`` also allows the
+        frontend to submit arbitrary free text, so any submitted value not
+        matching a real stop in the loaded list is rejected here. On a
+        valid submission, stores the picked stop and advances to
+        :meth:`async_step_route`.
 
         Args:
             user_input: Form data submitted by the user, or ``None`` when
@@ -356,13 +367,9 @@ class _SensorPickerFlow:
 
         Returns:
             A ConfigFlowResult that either re-shows the form with a load
-            error, or advances to :meth:`async_step_route`.
+            or validation error, or advances to :meth:`async_step_route`.
         """
         errors: dict[str, str] = {}
-
-        if user_input is not None:
-            self._pending_stop_id = user_input[CONF_STOP_ID]
-            return await self.async_step_route()
 
         stops: list[Stop] = []
         try:
@@ -372,12 +379,20 @@ class _SensorPickerFlow:
             _LOGGER.warning("Static GTFS picker load failed: %s", exc)
             errors["base"] = "cannot_load_static_gtfs"
 
+        if user_input is not None and not errors:
+            stop_id = user_input[CONF_STOP_ID]
+            if any(stop.stop_id == stop_id for stop in stops):
+                self._pending_stop_id = stop_id
+                return await self.async_step_route()
+            errors[CONF_STOP_ID] = "invalid_stop"
+
         schema = vol.Schema(
             {
                 vol.Required(CONF_STOP_ID): SelectSelector(
                     SelectSelectorConfig(
                         options=_build_stop_options(stops),
                         mode=SelectSelectorMode.DROPDOWN,
+                        custom_value=True,
                     )
                 ),
             }
@@ -386,6 +401,9 @@ class _SensorPickerFlow:
             step_id="stop",
             data_schema=schema,
             errors=errors,
+            description_placeholders={
+                "readme_url": f"{_README_URL}#step-2--add-a-sensor"
+            },
         )
 
     async def async_step_route(
@@ -484,6 +502,9 @@ class _SensorPickerFlow:
             step_id="route",
             data_schema=schema,
             errors=errors,
+            description_placeholders={
+                "readme_url": f"{_README_URL}#step-2--add-a-sensor"
+            },
         )
 
     async def async_step_sensor_menu(
@@ -675,6 +696,10 @@ class TfiLiveConfigFlow(_SensorPickerFlow, config_entries.ConfigFlow, domain=DOM
             step_id="user",
             data_schema=schema,
             errors=errors,
+            description_placeholders={
+                "nta_portal_url": _NTA_PORTAL_URL,
+                "readme_url": f"{_README_URL}#step-1--integration-settings",
+            },
         )
 
     async def async_step_finish(
@@ -750,6 +775,10 @@ class TfiLiveConfigFlow(_SensorPickerFlow, config_entries.ConfigFlow, domain=DOM
             step_id="reauth_confirm",
             data_schema=schema,
             errors=errors,
+            description_placeholders={
+                "nta_portal_url": _NTA_PORTAL_URL,
+                "readme_url": f"{_README_URL}#re-authentication",
+            },
         )
 
     async def async_step_reconfigure(
@@ -846,6 +875,10 @@ class TfiLiveConfigFlow(_SensorPickerFlow, config_entries.ConfigFlow, domain=DOM
             step_id="reconfigure",
             data_schema=schema,
             errors=errors,
+            description_placeholders={
+                "nta_portal_url": _NTA_PORTAL_URL,
+                "readme_url": f"{_README_URL}#reconfiguration",
+            },
         )
 
 

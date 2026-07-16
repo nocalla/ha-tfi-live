@@ -125,6 +125,43 @@ automation:
           message: "Next 46A in {{ states('sensor.next_46a_ranelagh') }} minutes"
 ```
 
+## Dashboard Examples
+
+### Template sensor — next due route
+
+If you have a stop-wide sensor (no `route_id` configured, so it reports the next departure of any route from that stop), the sensor state is just minutes — the route itself lives in the `departures` attribute. This template sensor combines them into a single human-readable string:
+
+```yaml
+template:
+  - sensor:
+      - name: "Next Due at Ranelagh"
+        state: >
+          {% set departures = state_attr('sensor.next_departure_ranelagh', 'departures') %}
+          {% if departures %}
+            {{ departures[0].route_name }} in {{ states('sensor.next_departure_ranelagh') }} min
+          {% else %}
+            No upcoming service
+          {% endif %}
+        icon: mdi:bus-clock
+```
+
+### Card — next 3 departures from a stop
+
+A Markdown card that lists the `departures` attribute in full, including real-time delay:
+
+```yaml
+type: markdown
+title: Next Departures
+content: >
+  {% for dep in state_attr('sensor.next_departure_ranelagh', 'departures') %}
+  **{{ dep.route_name }}** — {{ dep.realtime_time or dep.scheduled_time }}
+  {%- if dep.delay_minutes %} ({{ dep.delay_minutes }} min late){% endif %}
+
+  {% endfor %}
+```
+
+Replace `sensor.next_departure_ranelagh` with your own sensor's entity ID in both examples.
+
 ## Data Updates
 
 - **Real-time feed:** polled every 60 seconds from the NTA GTFS-RT endpoint — the maximum rate permitted by the NTA fair usage policy (see below).
