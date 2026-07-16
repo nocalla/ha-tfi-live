@@ -1,6 +1,8 @@
 name: Release
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       bump:
@@ -13,16 +15,51 @@ on:
           - major
 
 jobs:
+  determine-bump:
+    name: Determine bump type
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      bump: ${{ steps.find.outputs.bump }}
+    steps:
+      - name: Find release label on the merged PR
+        id: find
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          labels=$(gh api "repos/${{ github.repository }}/commits/${{ github.sha }}/pulls" \
+            --jq '.[0].labels[].name // empty')
+          bump=""
+          while IFS= read -r label; do
+            case "$label" in
+              "release: major") bump="major" ;;
+              "release: minor") bump="minor" ;;
+              "release: patch") [ -z "$bump" ] && bump="patch" ;;
+            esac
+          done <<< "$labels"
+          echo "bump=$bump" >> "$GITHUB_OUTPUT"
+
   release:
     name: Release
+    needs: [determine-bump]
+    if: |
+      always() && !cancelled() &&
+      (github.event_name == 'workflow_dispatch' ||
+       needs.determine-bump.outputs.bump != '')
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      BUMP: ${{ inputs.bump || needs.determine-bump.outputs.bump }}
 
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: main
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install uv
@@ -41,8 +78,6 @@ jobs:
 
       - name: Bump version
         id: bump
-        env:
-          BUMP: ${{ inputs.bump }}
         run: |
           cat > /tmp/bump_version.py << 'EOF'
           import json
@@ -82,16 +117,6 @@ jobs:
           with open("pyproject.toml", "w") as f:
               f.write(content)
 
-          with open("README.md") as f:
-              readme = f.read()
-          readme = re.sub(
-              r'(!\[Release\]\(https://img\.shields\.io/badge/release-)v[^-]+-',
-              rf"\g<1>v{new_version}-",
-              readme,
-          )
-          with open("README.md", "w") as f:
-              f.write(readme)
-
           tag = f"v{new_version}"
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
               f.write(f"version={new_version}\n")
@@ -105,7 +130,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add custom_components/tfi_live/manifest.json pyproject.toml README.md
+          git add custom_components/tfi_live/manifest.json pyproject.toml
           git commit -m "chore: release ${{ steps.bump.outputs.tag }}"
           git tag ${{ steps.bump.outputs.tag }}
           git push origin main

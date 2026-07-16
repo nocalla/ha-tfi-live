@@ -82,29 +82,37 @@ All jobs must be green before merge.
 
 ## Maintainer guide: cutting a release
 
-Releases are fully automated by `.github/workflows/release.yml`. The workflow
-is triggered manually (`workflow_dispatch`) with one required input, `bump`,
-which is `patch`, `minor`, or `major`.
+Releases are fully automated by `.github/workflows/release.yml`, and can be
+triggered two ways:
 
-There are two ways to trigger it:
+1. **Automatically on merge:** label the PR `release: patch`, `release: minor`,
+   or `release: major` before merging. Once the merge lands on `main`, the
+   workflow looks up the label on the merged PR and cuts a release with that
+   bump type. PRs without one of these labels (e.g. docs-only or CI-only
+   changes) merge normally with no release. If a PR carries more than one
+   `release: *` label, `major` wins over `minor` over `patch`.
+2. **Manually:** run the workflow with an explicit bump type, useful for
+   releasing without going through a labelled PR (e.g. after a direct push
+   to `main`).
+   - **GitHub UI:** Actions → Release → Run workflow → choose the bump type.
+   - **CLI:** `gh workflow run Release -f bump=patch` (or `minor` / `major`).
 
-1. **GitHub UI:** Actions → Release → Run workflow → choose the bump type.
-2. **CLI:** `gh workflow run Release -f bump=patch` (or `minor` / `major`).
-
-Once triggered, the workflow does everything — no manual tagging or release
-drafting is needed:
+Either way, the workflow does everything from there — no manual tagging or
+release drafting is needed:
 
 1. Runs the full test suite (the release aborts if tests fail).
-2. Bumps the version (per the chosen bump type) in:
+2. Bumps the version (per the bump type) in:
    - `custom_components/tfi_live/manifest.json` (the source of truth for
      the current version),
-   - `pyproject.toml`,
-   - the Release badge in `README.md`.
+   - `pyproject.toml`.
 3. Commits the changes as `chore: release vX.Y.Z`, tags `vX.Y.Z`, and pushes
    both to `main`.
 4. Builds `ha-tfi-live.zip` from `custom_components/tfi_live/`.
 5. Creates a GitHub release for the tag with auto-generated release notes and
    the zip attached.
+
+The Release badge in `README.md` is dynamic (sourced live from the GitHub
+releases API), so it needs no update as part of this process.
 
 HACS picks up new versions from GitHub release tags, so publishing the release
 is all that is needed for users to see the update.
