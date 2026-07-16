@@ -12,8 +12,6 @@ A Home Assistant custom integration for real-time Irish public transport departu
 
 Each configured sensor reports the minutes to the next departure for a given stop and route, with up to three upcoming departures available as attributes. The sensor state is an integer suitable for use in automations (e.g. "leave when the next bus is 8 minutes away").
 
-> **Breaking change:** the integration's internal domain was renamed from `ha_tfi_live` to `tfi_live`. Home Assistant does not migrate config entries across a domain rename, so upgrading past this version requires removing and re-adding the integration.
-
 ## Features
 
 - Minutes to next departure as sensor state (integer, truncated toward zero)
