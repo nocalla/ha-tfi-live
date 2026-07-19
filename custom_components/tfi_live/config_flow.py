@@ -239,12 +239,12 @@ def _direction_label(direction_id: int, termini: list[str]) -> str:
     return f"towards {shown}{suffix}"
 
 
-async def _build_direction_options(
-    client: StaticGtfsPickerClient | None, stop_id: str
+def _build_direction_options(
+    termini_results: dict[int, list[str] | BaseException],
 ) -> list[SelectOptionDict]:
     """Build select options for the direction-picker field.
 
-    Termini are always resolved across every route serving ``stop_id``
+    Termini are always resolved across every route serving the picked stop
     (``route_id=None``) rather than the specific route the user is about to
     pick, since both fields are submitted together on the same form and the
     route choice isn't known yet when this is rendered. This naturally
@@ -256,11 +256,17 @@ async def _build_direction_options(
     unavoidable without splitting route and direction into separate steps,
     which is out of scope here.
 
+    A pure formatter over already-resolved results — the caller is
+    responsible for issuing the two ``async_get_termini`` calls (typically
+    concurrently, alongside the route lookup, via ``asyncio.gather``).
+
     Args:
-        client: The loaded picker client to query termini with, or ``None``
-            when the static GTFS feed failed to load — both real directions
-            then degrade to plain numbered labels.
-        stop_id: The picked stop to resolve termini for.
+        termini_results: The result of each direction's termini lookup,
+            keyed by direction id (``0``/``1``) — either the resolved
+            terminus name list, or the exception it failed with (e.g. from
+            ``asyncio.gather(..., return_exceptions=True)``). A
+            ``StaticGtfsLoadError`` degrades that direction to a plain
+            numbered label; any other exception is re-raised.
 
     Returns:
         Exactly three select options: "Any direction" (value ``""``,
@@ -268,19 +274,21 @@ async def _build_direction_options(
         and ``"1"``), each labelled with real terminus names when
         available or a plain numbered fallback otherwise.
     """
-    labels = {0: "Direction 0", 1: "Direction 1"}
-    if client is not None:
-        for direction_id in (0, 1):
-            try:
-                termini = await client.async_get_termini(stop_id, None, direction_id)
-            except StaticGtfsLoadError as exc:
-                _LOGGER.warning(
-                    "Static GTFS termini lookup failed for direction %s: %s",
-                    direction_id,
-                    exc,
-                )
-                termini = []
-            labels[direction_id] = _direction_label(direction_id, termini)
+    labels: dict[int, str] = {}
+    for direction_id in (0, 1):
+        result = termini_results[direction_id]
+        if isinstance(result, StaticGtfsLoadError):
+            _LOGGER.warning(
+                "Static GTFS termini lookup failed for direction %s: %s",
+                direction_id,
+                result,
+            )
+            termini: list[str] = []
+        elif isinstance(result, BaseException):
+            raise result
+        else:
+            termini = result
+        labels[direction_id] = _direction_label(direction_id, termini)
     return [
         SelectOptionDict(value="", label="Any direction"),
         SelectOptionDict(value="0", label=labels[0]),
@@ -466,19 +474,36 @@ class _SensorPickerFlow:
         routes: list[Route] = []
         show_agency = False
         picker_client: StaticGtfsPickerClient | None = None
+        termini_results: dict[int, list[str] | BaseException] = {0: [], 1: []}
         try:
             picker_client = await self._get_picker_client()
-            routes = await picker_client.async_get_routes_for_stop(stop_id)
-            if not routes:
-                routes = picker_client.list_routes()
-                show_agency = True
-                errors["base"] = "route_list_not_narrowed"
         except StaticGtfsLoadError as exc:
             _LOGGER.warning("Static GTFS picker load failed: %s", exc)
             errors["base"] = "cannot_load_static_gtfs"
             picker_client = None
 
-        direction_options = await _build_direction_options(picker_client, stop_id)
+        if picker_client is not None:
+            routes_result, termini_0, termini_1 = await asyncio.gather(
+                picker_client.async_get_routes_for_stop(stop_id),
+                picker_client.async_get_termini(stop_id, None, 0),
+                picker_client.async_get_termini(stop_id, None, 1),
+                return_exceptions=True,
+            )
+            termini_results = {0: termini_0, 1: termini_1}
+
+            if isinstance(routes_result, StaticGtfsLoadError):
+                _LOGGER.warning("Static GTFS picker load failed: %s", routes_result)
+                errors["base"] = "cannot_load_static_gtfs"
+            elif isinstance(routes_result, BaseException):
+                raise routes_result
+            else:
+                routes = routes_result
+                if not routes:
+                    routes = picker_client.list_routes()
+                    show_agency = True
+                    errors["base"] = "route_list_not_narrowed"
+
+        direction_options = _build_direction_options(termini_results)
 
         schema = vol.Schema(
             {
@@ -570,8 +595,9 @@ class TfiLiveConfigFlow(_SensorPickerFlow, config_entries.ConfigFlow, domain=DOM
 
     VERSION = 1
     # Minor version 2: trip update URLs no longer carry format=json (#99);
-    # async_migrate_entry in __init__ strips it from stored entries.
-    MINOR_VERSION = 2
+    # Minor version 3: sensors moved from entry.data to entry.options (#144);
+    # async_migrate_entry in __init__ migrates stored entries for both.
+    MINOR_VERSION = 3
 
     def __init__(self) -> None:
         """Initialise the config flow with an empty staged config."""
@@ -707,14 +733,27 @@ class TfiLiveConfigFlow(_SensorPickerFlow, config_entries.ConfigFlow, domain=DOM
     ) -> ConfigFlowResult:
         """Handle the 'Finish' menu choice and create the config entry.
 
+        ``entry.options[CONF_SENSORS]`` is the single, permanent home for
+        the sensor list — for sensors added here at initial setup and via
+        the options flow alike — so the staged sensors are split out of
+        ``entry.data`` and seeded into ``entry.options`` at creation time
+        instead. ``entry.data`` retains only connection-level config.
+
         Args:
             user_input: Unused; present to satisfy the HA flow handler
                 protocol.
 
         Returns:
-            A ConfigFlowResult that creates the config entry with all staged data.
+            A ConfigFlowResult that creates the config entry with
+            connection-level data and the initial sensors seeded into
+            options.
         """
-        return self.async_create_entry(title="TFI Live", data=self._config)
+        sensors = self._config.pop(CONF_SENSORS, [])
+        return self.async_create_entry(
+            title="TFI Live",
+            data=self._config,
+            options={CONF_SENSORS: sensors},
+        )
 
     async def async_step_reauth(self, entry_data: dict[str, Any]) -> ConfigFlowResult:
         """Handle the start of a re-authentication flow.
@@ -882,12 +921,18 @@ class TfiLiveConfigFlow(_SensorPickerFlow, config_entries.ConfigFlow, domain=DOM
         )
 
 
-class TfiLiveOptionsFlowHandler(_SensorPickerFlow, config_entries.OptionsFlow):
+class TfiLiveOptionsFlowHandler(
+    _SensorPickerFlow, config_entries.OptionsFlowWithReload
+):
     """Options flow for managing sensors after initial setup.
 
     Mirrors the sensor-addition steps from the main config flow but
-    operates on the existing config entry data to append new sensors.
-    Removing existing sensors is not supported in this version.
+    operates on the existing config entry options to append new sensors.
+    Reloads the entry automatically on completion (``automatic_reload``,
+    inherited ``True`` from :class:`~homeassistant.config_entries.
+    OptionsFlowWithReload`) since ``entry.options[CONF_SENSORS]`` is where
+    the sensor list actually lives. Removing existing sensors is not
+    supported in this version.
     """
 
     def __init__(self) -> None:
@@ -931,8 +976,11 @@ class TfiLiveOptionsFlowHandler(_SensorPickerFlow, config_entries.OptionsFlow):
     ) -> ConfigFlowResult:
         """Handle the 'Finish' menu choice and persist new sensors.
 
-        Merges the newly added sensors into the existing entry data and
-        creates the options entry to trigger a coordinator reload.
+        Merges the newly added sensors into the existing entry options —
+        the single source of truth for the sensor list — and creates the
+        options entry, which HA stores as ``entry.options`` and then
+        automatically reloads (``automatic_reload`` on
+        :class:`~homeassistant.config_entries.OptionsFlowWithReload`).
 
         Args:
             user_input: Unused; present to satisfy the HA flow handler
@@ -943,10 +991,8 @@ class TfiLiveOptionsFlowHandler(_SensorPickerFlow, config_entries.OptionsFlow):
             sensor data.
         """
         existing_sensors: list[dict[str, Any]] = list(
-            self.config_entry.data.get(CONF_SENSORS, [])
+            self.config_entry.options.get(CONF_SENSORS, [])
         )
-        updated_data = {
-            **self.config_entry.data,
-            CONF_SENSORS: existing_sensors + self._new_sensors,
-        }
-        return self.async_create_entry(title="", data=updated_data)
+        return self.async_create_entry(
+            title="", data={CONF_SENSORS: existing_sensors + self._new_sensors}
+        )

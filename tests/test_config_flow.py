@@ -19,6 +19,7 @@ the project's existing convention for ``GtfsRtClient``.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 from contextlib import contextmanager
 from typing import Any
@@ -26,6 +27,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import voluptuous as vol
+from homeassistant import config_entries
 from homeassistant.data_entry_flow import AbortFlow, FlowResultType
 from nta_gtfs import (
     GtfsRtAuthError,
@@ -277,10 +279,11 @@ def flow(mock_hass: MagicMock) -> TfiLiveConfigFlow:
 
     f.async_show_form = _stub_show_form(f)
     f.async_show_menu = _stub_show_menu(f)
-    f.async_create_entry = lambda title, data: {
+    f.async_create_entry = lambda title, data, options=None: {
         "type": FlowResultType.CREATE_ENTRY,
         "title": title,
         "data": data,
+        "options": options or {},
     }
     f.async_abort = lambda reason: {
         "type": FlowResultType.ABORT,
@@ -935,6 +938,144 @@ async def test_route_direction_options_static_gtfs_load_failure_falls_back(
     ]
 
 
+# ---------------------------------------------------------------------------
+# Issue #143 — route/termini calls gathered concurrently, isolated failures
+# ---------------------------------------------------------------------------
+
+
+async def test_route_direction_isolation_direction0_fails_direction1_succeeds(
+    flow: TfiLiveConfigFlow,
+) -> None:
+    """A direction-0 termini failure doesn't affect direction 1's real label.
+
+    Uses a real ``StaticGtfsLoadError`` raised only for direction 0 (not the
+    fixture's empty-termini shortcut) to prove per-call isolation under the
+    gathered ``asyncio.gather(..., return_exceptions=True)`` call — a failure
+    on one direction must not touch the sibling direction's resolved result.
+    """
+    flow._config = _prefilled_config()
+    flow._pending_stop_id = _STOP.stop_id
+
+    async def termini_side_effect(
+        stop_id: str, route_id: str | None, direction_id: int
+    ) -> list[str]:
+        """Fail direction 0 only; direction 1 resolves normally."""
+        if direction_id == 0:
+            raise StaticGtfsLoadError("boom")
+        return ["Parnell St"]
+
+    with _patch_picker_client() as client:
+        client.async_get_termini = AsyncMock(side_effect=termini_side_effect)
+        result = await flow.async_step_route(None)
+
+    options = _direction_options(result["data_schema"])
+    assert options[1] == {"value": "0", "label": "Direction 0"}
+    assert options[2] == {"value": "1", "label": "towards Parnell St"}
+    # The routes call is unaffected by the termini failure.
+    assert result["errors"].get("base") != "cannot_load_static_gtfs"
+
+
+async def test_route_direction_isolation_direction1_fails_direction0_succeeds(
+    flow: TfiLiveConfigFlow,
+) -> None:
+    """A direction-1 termini failure doesn't affect direction 0's real label."""
+    flow._config = _prefilled_config()
+    flow._pending_stop_id = _STOP.stop_id
+
+    async def termini_side_effect(
+        stop_id: str, route_id: str | None, direction_id: int
+    ) -> list[str]:
+        """Fail direction 1 only; direction 0 resolves normally."""
+        if direction_id == 1:
+            raise StaticGtfsLoadError("boom")
+        return ["Broadstone"]
+
+    with _patch_picker_client() as client:
+        client.async_get_termini = AsyncMock(side_effect=termini_side_effect)
+        result = await flow.async_step_route(None)
+
+    options = _direction_options(result["data_schema"])
+    assert options[1] == {"value": "0", "label": "towards Broadstone"}
+    assert options[2] == {"value": "1", "label": "Direction 1"}
+    assert result["errors"].get("base") != "cannot_load_static_gtfs"
+
+
+async def test_route_isolation_routes_call_fails_directions_unaffected(
+    flow: TfiLiveConfigFlow,
+) -> None:
+    """A ``StaticGtfsLoadError`` from the routes call alone doesn't touch termini.
+
+    Distinct from :func:`test_route_load_failure_shows_error`, which fails
+    at client *load* time (before the gather even starts) — this fails the
+    ``async_get_routes_for_stop`` leg of the gather specifically, after a
+    successful load, to prove that leg's failure is isolated from the two
+    termini legs under ``return_exceptions=True``.
+    """
+    flow._config = _prefilled_config()
+    flow._pending_stop_id = _STOP.stop_id
+
+    with _patch_picker_client(
+        termini_by_direction={0: ["Broadstone"], 1: ["Parnell St"]}
+    ) as client:
+        client.async_get_routes_for_stop = AsyncMock(
+            side_effect=StaticGtfsLoadError("boom")
+        )
+        result = await flow.async_step_route(None)
+
+    assert result["errors"]["base"] == "cannot_load_static_gtfs"
+    options = _direction_options(result["data_schema"])
+    assert options[1] == {"value": "0", "label": "towards Broadstone"}
+    assert options[2] == {"value": "1", "label": "towards Parnell St"}
+
+
+async def test_route_step_issues_three_calls_concurrently(
+    flow: TfiLiveConfigFlow,
+) -> None:
+    """Routes + both termini calls are in flight together, not sequential.
+
+    Each mocked call blocks on a shared barrier that only releases once all
+    three calls have actually started. Sequential ``await``s (the pre-#143
+    behavior) would leave this deadlocked on the first call forever, since
+    the barrier would never see a second or third call start — the
+    surrounding ``asyncio.wait_for`` turns that hang into a loud, fast
+    ``TimeoutError`` instead of a silently-passing assertion on call counts.
+    """
+    flow._config = _prefilled_config()
+    flow._pending_stop_id = _STOP.stop_id
+
+    started = 0
+    all_started = asyncio.Event()
+
+    async def _await_all_three_started() -> None:
+        """Increment the start counter and block until all 3 have started."""
+        nonlocal started
+        started += 1
+        if started == 3:
+            all_started.set()
+        await asyncio.wait_for(all_started.wait(), timeout=1)
+
+    async def routes_side_effect(stop_id: str) -> list[Route]:
+        """Mimic async_get_routes_for_stop, gated on the shared barrier."""
+        await _await_all_three_started()
+        return [_ROUTE]
+
+    async def termini_side_effect(
+        stop_id: str, route_id: str | None, direction_id: int
+    ) -> list[str]:
+        """Mimic async_get_termini, gated on the shared barrier."""
+        await _await_all_three_started()
+        return _DEFAULT_TERMINI.get(direction_id, [])
+
+    with _patch_picker_client() as client:
+        client.async_get_routes_for_stop = AsyncMock(side_effect=routes_side_effect)
+        client.async_get_termini = AsyncMock(side_effect=termini_side_effect)
+        result = await asyncio.wait_for(flow.async_step_route(None), timeout=1)
+
+    assert started == 3
+    assert result["type"] == FlowResultType.FORM
+    assert result["errors"] == {}
+
+
 async def test_route_direction_id_0_accepted(flow: TfiLiveConfigFlow) -> None:
     """Direction_id='0' is a valid value — no direction_id error raised."""
     flow._config = _prefilled_config()
@@ -1108,7 +1249,11 @@ async def test_add_another_loops_back_to_stop_form(
 async def test_finish_creates_entry_with_all_sensors(
     flow: TfiLiveConfigFlow,
 ) -> None:
-    """Async_step_finish creates a config entry whose data contains sensors."""
+    """Async_step_finish seeds entry.options with sensors, not entry.data.
+
+    entry.options[CONF_SENSORS] is the single source of truth for the
+    sensor list; entry.data keeps only connection-level config.
+    """
     # Arrange — pre-populate two sensors
     flow._config = {
         CONF_API_KEY: "k",
@@ -1126,7 +1271,8 @@ async def test_finish_creates_entry_with_all_sensors(
     # Assert
     assert result["type"] == FlowResultType.CREATE_ENTRY
     assert result["title"] == "TFI Live"
-    assert len(result["data"][CONF_SENSORS]) == 2
+    assert CONF_SENSORS not in result["data"]
+    assert len(result["options"][CONF_SENSORS]) == 2
 
 
 async def test_finish_closes_picker_client(flow: TfiLiveConfigFlow) -> None:
@@ -1626,10 +1772,10 @@ def options_flow(mock_hass: MagicMock) -> TfiLiveOptionsFlowHandler:
         CONF_API_KEY: "k",
         CONF_TRIP_UPDATE_URL: "https://a.com",
         CONF_STATIC_GTFS_URL: "https://b.com",
-        CONF_SENSORS: [],
     }
     mock_entry = MagicMock()
     mock_entry.data = existing_data
+    mock_entry.options = {CONF_SENSORS: []}
     mock_entry.domain = "tfi_live"
 
     # config_entry is a read-only property on OptionsFlow that calls
@@ -1694,21 +1840,24 @@ async def test_options_flow_stop_invalid_free_text_rejected(
     assert options_flow._pending_stop_id is None
 
 
-async def test_options_flow_adding_sensor_appends_to_entry_data(
+async def test_options_flow_adding_sensor_appends_to_entry_options(
     options_flow: TfiLiveOptionsFlowHandler,
     mock_hass: MagicMock,
 ) -> None:
-    """Issue #34: adding a sensor via options flow appends it to entry data."""
-    # Pre-populate an existing sensor in the mock entry returned by config_entry
-    existing_data_with_sensor = {
-        CONF_API_KEY: "k",
-        CONF_TRIP_UPDATE_URL: "https://a.com",
-        CONF_STATIC_GTFS_URL: "https://b.com",
+    """Issue #34/#137: adding a sensor via options flow persists to entry.options.
+
+    entry.options[CONF_SENSORS] is the single source of truth for sensors —
+    the existing sensor list is read from options (not data), the merged
+    result lands back in options (HA stores an OptionsFlow's ``data=`` as
+    ``entry.options``), and the handler is wired for automatic reload so a
+    newly added sensor appears without a manual reload.
+    """
+    # Pre-populate an existing sensor in the mock entry's options — entry.data
+    # deliberately carries no CONF_SENSORS to prove the read side no longer
+    # touches it.
+    mock_hass.config_entries.async_get_known_entry.return_value.options = {
         CONF_SENSORS: [{"name": "Existing", CONF_STOP_ID: "S1", CONF_ROUTE_ID: "R1"}],
     }
-    mock_hass.config_entries.async_get_known_entry.return_value.data = (
-        existing_data_with_sensor
-    )
 
     # Submit a valid new sensor via the two-step picker
     options_flow._pending_stop_id = _STOP.stop_id
@@ -1718,10 +1867,18 @@ async def test_options_flow_adding_sensor_appends_to_entry_data(
     result = await options_flow.async_step_finish()
 
     assert result["type"] == FlowResultType.CREATE_ENTRY
+    # HA's OptionsFlowManager stores an OptionsFlow's create_entry(data=...)
+    # as entry.options, not entry.data — asserting against result["data"]
+    # here is asserting against what becomes entry.options.
     sensors = result["data"][CONF_SENSORS]
     assert len(sensors) == 2
     assert sensors[0]["name"] == "Existing"
     assert sensors[1]["name"] == "New Sensor"
+
+    # The reload path: the handler is wired for HA's automatic-reload
+    # mechanism (no explicit async_reload/async_update_entry call needed).
+    assert isinstance(options_flow, config_entries.OptionsFlowWithReload)
+    assert options_flow.automatic_reload is True
 
 
 async def test_options_flow_route_validation_errors(
@@ -1818,6 +1975,34 @@ async def test_options_flow_direction_options_lookup_failure_falls_back(
         {"value": "0", "label": "Direction 0"},
         {"value": "1", "label": "Direction 1"},
     ]
+
+
+async def test_options_flow_direction_isolation_one_direction_fails(
+    options_flow: TfiLiveOptionsFlowHandler,
+) -> None:
+    """Options flow: a direction-0 termini failure doesn't affect direction 1.
+
+    Mirrors the config-flow isolation coverage — the options flow shares
+    ``_SensorPickerFlow.async_step_route``, so #143's per-call isolation
+    must hold here too, not just on the config-flow side.
+    """
+    options_flow._pending_stop_id = _STOP.stop_id
+
+    async def termini_side_effect(
+        stop_id: str, route_id: str | None, direction_id: int
+    ) -> list[str]:
+        """Fail direction 0 only; direction 1 resolves normally."""
+        if direction_id == 0:
+            raise StaticGtfsLoadError("boom")
+        return ["Parnell St"]
+
+    with _patch_picker_client() as client:
+        client.async_get_termini = AsyncMock(side_effect=termini_side_effect)
+        result = await options_flow.async_step_route(None)
+
+    options = _direction_options(result["data_schema"])
+    assert options[1] == {"value": "0", "label": "Direction 0"}
+    assert options[2] == {"value": "1", "label": "towards Parnell St"}
 
 
 async def test_options_flow_stop_load_failure_shows_error(

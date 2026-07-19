@@ -128,12 +128,13 @@ def _make_entry(*, sensors: list[dict] | None = None) -> MagicMock:
     state guard.
 
     Args:
-        sensors: List of sensor configuration dicts stored under CONF_SENSORS.
-            Defaults to a single minimal sensor config when omitted.
+        sensors: List of sensor configuration dicts stored under
+            ``entry.options[CONF_SENSORS]``. Defaults to a single minimal
+            sensor config when omitted.
 
     Returns:
-        MagicMock with ``entry_id``, ``data`` dict, ``state``, and a stub
-        ``async_start_reauth`` callable.
+        MagicMock with ``entry_id``, ``data`` dict, ``options`` dict,
+        ``state``, and a stub ``async_start_reauth`` callable.
     """
     if sensors is None:
         sensors = [
@@ -151,6 +152,8 @@ def _make_entry(*, sensors: list[dict] | None = None) -> MagicMock:
         CONF_API_KEY: _DUMMY_API_KEY,
         CONF_TRIP_UPDATE_URL: _DUMMY_TRIP_UPDATE_URL,
         CONF_STATIC_GTFS_URL: _DUMMY_STATIC_GTFS_URL,
+    }
+    entry.options = {
         CONF_SENSORS: sensors,
     }
     # Capture background coroutines scheduled by the coordinator (the static
@@ -393,7 +396,12 @@ async def test_setup_entry_gtfs_rt_auth_error_raises_config_entry_auth_failed() 
 
 
 def _make_migration_entry(
-    *, trip_update_url: str, version: int = 1, minor_version: int = 1
+    *,
+    trip_update_url: str,
+    version: int = 1,
+    minor_version: int = 1,
+    data_sensors: list[dict] | None = None,
+    options: dict | None = None,
 ) -> MagicMock:
     """Return a MagicMock ConfigEntry for async_migrate_entry tests.
 
@@ -401,10 +409,15 @@ def _make_migration_entry(
         trip_update_url: The stored trip update feed URL.
         version: The entry's major schema version.
         minor_version: The entry's minor schema version.
+        data_sensors: Sensors to seed under ``entry.data[CONF_SENSORS]``,
+            mimicking a pre-#144 entry that has never been through the
+            options flow. Defaults to an empty list when omitted.
+        options: The entry's ``options`` dict. Defaults to empty, mimicking
+            an entry that has never been through the options flow.
 
     Returns:
-        MagicMock with ``version``, ``minor_version``, and a ``data`` dict
-        containing the trip update URL.
+        MagicMock with ``version``, ``minor_version``, a ``data`` dict
+        containing the trip update URL, and an ``options`` dict.
     """
     entry = MagicMock()
     entry.version = version
@@ -413,8 +426,9 @@ def _make_migration_entry(
         CONF_API_KEY: _DUMMY_API_KEY,
         CONF_TRIP_UPDATE_URL: trip_update_url,
         CONF_STATIC_GTFS_URL: _DUMMY_STATIC_GTFS_URL,
-        CONF_SENSORS: [],
+        CONF_SENSORS: data_sensors if data_sensors is not None else [],
     }
+    entry.options = options if options is not None else {}
     return entry
 
 
@@ -430,11 +444,12 @@ async def test_migrate_entry_strips_format_json_from_old_default() -> None:
     result = await async_migrate_entry(hass, entry)
 
     assert result is True
-    hass.config_entries.async_update_entry.assert_called_once()
-    call_kwargs = hass.config_entries.async_update_entry.call_args[1]
-    assert call_kwargs["minor_version"] == 2
+    # Two migration steps run for a fresh v1.1 entry: the URL fix (1.2) and
+    # the sensors-to-options move (1.3, #144). The URL fix is the first call.
+    first_call_kwargs = hass.config_entries.async_update_entry.call_args_list[0][1]
+    assert first_call_kwargs["minor_version"] == 2
     assert (
-        call_kwargs["data"][CONF_TRIP_UPDATE_URL]
+        first_call_kwargs["data"][CONF_TRIP_UPDATE_URL]
         == "https://api.nationaltransport.ie/gtfsr/v2/TripUpdates"
     )
 
@@ -449,8 +464,8 @@ async def test_migrate_entry_preserves_other_query_params() -> None:
     result = await async_migrate_entry(hass, entry)
 
     assert result is True
-    call_kwargs = hass.config_entries.async_update_entry.call_args[1]
-    assert call_kwargs["data"][CONF_TRIP_UPDATE_URL] == (
+    first_call_kwargs = hass.config_entries.async_update_entry.call_args_list[0][1]
+    assert first_call_kwargs["data"][CONF_TRIP_UPDATE_URL] == (
         "https://example.com/feed?a=1&b=2"
     )
 
@@ -463,16 +478,18 @@ async def test_migrate_entry_clean_url_bumps_minor_version_only() -> None:
     result = await async_migrate_entry(hass, entry)
 
     assert result is True
-    call_kwargs = hass.config_entries.async_update_entry.call_args[1]
-    assert call_kwargs["minor_version"] == 2
-    assert call_kwargs["data"][CONF_TRIP_UPDATE_URL] == _DUMMY_TRIP_UPDATE_URL
+    first_call_kwargs = hass.config_entries.async_update_entry.call_args_list[0][1]
+    assert first_call_kwargs["minor_version"] == 2
+    assert first_call_kwargs["data"][CONF_TRIP_UPDATE_URL] == _DUMMY_TRIP_UPDATE_URL
 
 
 async def test_migrate_entry_current_version_is_noop() -> None:
-    """A v1.2 entry needs no migration and the entry data is untouched."""
+    """A v1.3 entry needs no migration and the entry data is untouched."""
     hass = _make_hass()
     entry = _make_migration_entry(
-        trip_update_url=_DUMMY_TRIP_UPDATE_URL, minor_version=2
+        trip_update_url=_DUMMY_TRIP_UPDATE_URL,
+        minor_version=3,
+        options={CONF_SENSORS: []},
     )
 
     result = await async_migrate_entry(hass, entry)
@@ -489,6 +506,82 @@ async def test_migrate_entry_future_version_returns_false() -> None:
     result = await async_migrate_entry(hass, entry)
 
     assert result is False
+    hass.config_entries.async_update_entry.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Issue #144: config entry migration moves sensors from data to options
+# ---------------------------------------------------------------------------
+
+
+async def test_migrate_entry_moves_sensors_from_data_to_options() -> None:
+    """A pre-#144 entry (never through the options flow) has sensors moved.
+
+    Such an entry has its sensors only under entry.data[CONF_SENSORS] and an
+    empty entry.options. Migration must copy them to entry.options and strip
+    them from entry.data, or every sensor for this entry would silently
+    vanish once the read sites switch to entry.options.
+    """
+    hass = _make_hass()
+    sensors = [{"name": "Existing", "stop_id": "S1", "route_id": "R1"}]
+    entry = _make_migration_entry(
+        trip_update_url=_DUMMY_TRIP_UPDATE_URL,
+        minor_version=2,
+        data_sensors=sensors,
+        options={},
+    )
+
+    result = await async_migrate_entry(hass, entry)
+
+    assert result is True
+    call_kwargs = hass.config_entries.async_update_entry.call_args[1]
+    assert call_kwargs["minor_version"] == 3
+    assert call_kwargs["options"][CONF_SENSORS] == sensors
+    assert CONF_SENSORS not in call_kwargs["data"]
+
+
+async def test_migrate_entry_keeps_existing_options_sensors() -> None:
+    """A post-#144-options-flow entry already has sensors under options.
+
+    Such an entry's stale entry.data[CONF_SENSORS] copy (from the old
+    options flow's ``async_create_entry`` call, which HA stores as
+    entry.options for an OptionsFlow — the value under entry.data itself is
+    untouched) must not overwrite the real, possibly newer, options copy.
+    """
+    hass = _make_hass()
+    stale_data_sensors = [{"name": "Stale", "stop_id": "S0", "route_id": "R0"}]
+    real_sensors = [
+        {"name": "Existing", "stop_id": "S1", "route_id": "R1"},
+        {"name": "Added via options flow", "stop_id": "S2", "route_id": "R2"},
+    ]
+    entry = _make_migration_entry(
+        trip_update_url=_DUMMY_TRIP_UPDATE_URL,
+        minor_version=2,
+        data_sensors=stale_data_sensors,
+        options={CONF_SENSORS: real_sensors},
+    )
+
+    result = await async_migrate_entry(hass, entry)
+
+    assert result is True
+    call_kwargs = hass.config_entries.async_update_entry.call_args[1]
+    assert call_kwargs["minor_version"] == 3
+    assert call_kwargs["options"][CONF_SENSORS] == real_sensors
+    assert CONF_SENSORS not in call_kwargs["data"]
+
+
+async def test_migrate_entry_sensors_already_current_is_noop() -> None:
+    """A v1.3 entry with sensors already in options needs no migration."""
+    hass = _make_hass()
+    entry = _make_migration_entry(
+        trip_update_url=_DUMMY_TRIP_UPDATE_URL,
+        minor_version=3,
+        options={CONF_SENSORS: [{"name": "X", "stop_id": "S1", "route_id": "R1"}]},
+    )
+
+    result = await async_migrate_entry(hass, entry)
+
+    assert result is True
     hass.config_entries.async_update_entry.assert_not_called()
 
 
