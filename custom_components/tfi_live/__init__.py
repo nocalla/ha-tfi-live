@@ -52,6 +52,18 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     Version 1.2 strips ``format=json`` from the stored trip update URL so
     entries created with the pre-#99 default recover without being re-added.
 
+    Version 1.3 moves the sensor list from ``entry.data`` to
+    ``entry.options`` (#144), which is now the single source of truth read
+    by every sensor consumer (``async_setup_entry``, ``sensor.py``,
+    ``coordinator.py``, ``diagnostics.py``). Entries last touched by the
+    pre-#144 options flow already have their sensors under ``entry.options``
+    (an ``OptionsFlow``'s ``async_create_entry(data=...)`` is stored there by
+    HA, even though the old handler called it with entry-data-shaped
+    content) — those are left alone. Entries that have never been through
+    the options flow still have their sensors under ``entry.data`` only, so
+    those are copied across and stripped from ``entry.data``. Without this
+    step, every such entry would silently lose all its sensors on upgrade.
+
     Args:
         hass: The Home Assistant instance.
         entry: The config entry to migrate.
@@ -76,6 +88,23 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             entry,
             data={**entry.data, CONF_TRIP_UPDATE_URL: migrated},
             minor_version=2,
+        )
+
+    if entry.minor_version < 3:
+        if CONF_SENSORS in entry.options:
+            sensors = entry.options[CONF_SENSORS]
+        else:
+            sensors = entry.data.get(CONF_SENSORS, [])
+            _logger.info(
+                "Migrating %d sensor(s) from entry.data to entry.options",
+                len(sensors),
+            )
+        new_data = {k: v for k, v in entry.data.items() if k != CONF_SENSORS}
+        hass.config_entries.async_update_entry(
+            entry,
+            data=new_data,
+            options={**entry.options, CONF_SENSORS: sensors},
+            minor_version=3,
         )
 
     return True

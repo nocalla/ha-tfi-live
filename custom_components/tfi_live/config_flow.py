@@ -595,8 +595,9 @@ class TfiLiveConfigFlow(_SensorPickerFlow, config_entries.ConfigFlow, domain=DOM
 
     VERSION = 1
     # Minor version 2: trip update URLs no longer carry format=json (#99);
-    # async_migrate_entry in __init__ strips it from stored entries.
-    MINOR_VERSION = 2
+    # Minor version 3: sensors moved from entry.data to entry.options (#144);
+    # async_migrate_entry in __init__ migrates stored entries for both.
+    MINOR_VERSION = 3
 
     def __init__(self) -> None:
         """Initialise the config flow with an empty staged config."""
