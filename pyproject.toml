@@ -8,7 +8,7 @@ version = "0.4.1"
 description = "Home Assistant custom integration for NTA/TFI real-time public transport departures"
 requires-python = ">=3.12"
 dependencies = [
-    "nta-gtfs>=0.6.1",
+    "nta-gtfs>=0.6.2",
 ]
 
 [project.optional-dependencies]
