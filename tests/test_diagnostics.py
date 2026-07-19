@@ -26,7 +26,9 @@ def mock_hass() -> MagicMock:
 def mock_entry() -> MagicMock:
     """Return a mock config entry with a coordinator on runtime_data.
 
-    The entry data includes api_key, sensors, and feed URL fields.
+    The entry data includes api_key and feed URL fields; sensors live under
+    entry.options, matching entry.options[CONF_SENSORS] as the single
+    source of truth.
     The coordinator exposes ``_last_successful_fetch``, ``last_update_success``,
     and ``data`` matching the real TfiLiveCoordinator shape.
 
@@ -44,6 +46,8 @@ def mock_entry() -> MagicMock:
         "api_key": "super-secret-key",
         "trip_update_url": "https://example.com/trips",
         "static_gtfs_url": "https://example.com/gtfs.zip",
+    }
+    entry.options = {
         "sensors": [
             {
                 "name": "Next 46A",
@@ -99,8 +103,8 @@ async def test_diagnostics_sensors_strip_api_key(
 ) -> None:
     """Sensor entries do not expose api_key even if present in sensor config."""
     # Inject an api_key into a sensor config to verify it is stripped.
-    mock_entry.data = {
-        **mock_entry.data,
+    mock_entry.options = {
+        **mock_entry.options,
         "sensors": [
             {
                 "name": "Next 46A",

@@ -245,7 +245,7 @@ class TfiLiveCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
 
         pairs: dict[tuple[str, str], list[str]] = {}
-        for sensor_config in self._config_entry.data.get(CONF_SENSORS, []):
+        for sensor_config in self._config_entry.options.get(CONF_SENSORS, []):
             route_id: str | None = sensor_config[CONF_ROUTE_ID]
             if route_id is None:
                 # Stop-wide sensors have no single route to check for a

@@ -128,12 +128,13 @@ def _make_entry(*, sensors: list[dict] | None = None) -> MagicMock:
     state guard.
 
     Args:
-        sensors: List of sensor configuration dicts stored under CONF_SENSORS.
-            Defaults to a single minimal sensor config when omitted.
+        sensors: List of sensor configuration dicts stored under
+            ``entry.options[CONF_SENSORS]``. Defaults to a single minimal
+            sensor config when omitted.
 
     Returns:
-        MagicMock with ``entry_id``, ``data`` dict, ``state``, and a stub
-        ``async_start_reauth`` callable.
+        MagicMock with ``entry_id``, ``data`` dict, ``options`` dict,
+        ``state``, and a stub ``async_start_reauth`` callable.
     """
     if sensors is None:
         sensors = [
@@ -151,6 +152,8 @@ def _make_entry(*, sensors: list[dict] | None = None) -> MagicMock:
         CONF_API_KEY: _DUMMY_API_KEY,
         CONF_TRIP_UPDATE_URL: _DUMMY_TRIP_UPDATE_URL,
         CONF_STATIC_GTFS_URL: _DUMMY_STATIC_GTFS_URL,
+    }
+    entry.options = {
         CONF_SENSORS: sensors,
     }
     # Capture background coroutines scheduled by the coordinator (the static

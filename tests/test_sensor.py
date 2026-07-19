@@ -1186,7 +1186,7 @@ async def test_sensor_async_setup_entry_registers_entities() -> None:
     and mock async_add_entities to exercise the function body.
 
     Arrange: mock coordinator on entry.runtime_data; two sensor configs in
-        entry.data[CONF_SENSORS]; mock async_add_entities callback.
+        entry.options[CONF_SENSORS]; mock async_add_entities callback.
     Act: call sensor.async_setup_entry.
     Assert: async_add_entities was called once with a list of two TfiLiveSensors.
     """
@@ -1209,7 +1209,8 @@ async def test_sensor_async_setup_entry_registers_entities() -> None:
     entry = MagicMock()
     entry.entry_id = "eid"
     entry.runtime_data = coord
-    entry.data = {
+    entry.data = {}
+    entry.options = {
         CONF_SENSORS: [
             {"stop_id": "S1", "route_id": "46A", "name": "Sensor 1"},
             {"stop_id": "S2", "route_id": "39A", "name": "Sensor 2"},
@@ -1263,6 +1264,8 @@ async def test_sensor_async_setup_entry_uses_configured_num_departures() -> None
     entry.runtime_data = coord
     entry.data = {
         CONF_NUM_DEPARTURES: 7,
+    }
+    entry.options = {
         CONF_SENSORS: [{"stop_id": "S1", "route_id": "46A", "name": "Sensor 1"}],
     }
 

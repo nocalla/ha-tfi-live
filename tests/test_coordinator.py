@@ -78,6 +78,7 @@ def mock_entry():
         "trip_update_url": "https://example.com/gtfs-rt",
         "api_key": "test-key",
     }
+    entry.options = {}
     entry.entry_id = "test_entry_id"
     # Close scheduled background coroutines so they never leak as
     # "coroutine was never awaited" warnings; tests that need to run the
@@ -507,7 +508,7 @@ async def test_unmatched_pair_creates_repairs_issue(
     create, delete, _ = mock_ir
     mock_cache.available = True
     mock_cache.has_scheduled_pair = MagicMock(return_value=False)
-    mock_entry.data["sensors"] = [
+    mock_entry.options["sensors"] = [
         {"name": "Farranlea Pk 220", "stop_id": "8370B2418801", "route_id": "220"}
     ]
 
@@ -532,7 +533,7 @@ async def test_matched_pair_clears_repairs_issue(
     create, delete, _ = mock_ir
     mock_cache.available = True
     mock_cache.has_scheduled_pair = MagicMock(return_value=True)
-    mock_entry.data["sensors"] = [
+    mock_entry.options["sensors"] = [
         {"name": "Farranlea Pk 220", "stop_id": "8370B2418801", "route_id": "2 220 c b"}
     ]
 
@@ -550,7 +551,7 @@ async def test_no_repairs_check_before_cache_available(
     """No issue is created or deleted before the cache has loaded once."""
     create, delete, _ = mock_ir
     mock_cache.available = False
-    mock_entry.data["sensors"] = [
+    mock_entry.options["sensors"] = [
         {"name": "Farranlea Pk 220", "stop_id": "8370B2418801", "route_id": "220"}
     ]
 
@@ -573,7 +574,7 @@ async def test_stop_wide_sensor_skipped_by_unmatched_pair_check(
     create, delete, _ = mock_ir
     mock_cache.available = True
     mock_cache.has_scheduled_pair = MagicMock(return_value=False)
-    mock_entry.data["sensors"] = [
+    mock_entry.options["sensors"] = [
         {"name": "Any bus", "stop_id": "8370B2418801", "route_id": None}
     ]
 
@@ -591,7 +592,7 @@ async def test_shared_pair_produces_one_issue_naming_both_sensors(
     create, delete, _ = mock_ir
     mock_cache.available = True
     mock_cache.has_scheduled_pair = MagicMock(return_value=False)
-    mock_entry.data["sensors"] = [
+    mock_entry.options["sensors"] = [
         {
             "name": "Inbound",
             "stop_id": "8370B2418801",
@@ -624,7 +625,7 @@ async def test_no_repairs_check_on_static_refresh_failure(
         side_effect=StaticGtfsLoadError("HTTP 500")
     )
     mock_cache.available = True
-    mock_entry.data["sensors"] = [
+    mock_entry.options["sensors"] = [
         {"name": "Farranlea Pk 220", "stop_id": "8370B2418801", "route_id": "220"}
     ]
 
@@ -647,7 +648,7 @@ async def test_stale_issue_cleared_when_sensor_pair_no_longer_configured(
     create, delete, get_registry = mock_ir
     mock_cache.available = True
     mock_cache.has_scheduled_pair = MagicMock(return_value=True)
-    mock_entry.data["sensors"] = [
+    mock_entry.options["sensors"] = [
         {"name": "Current Sensor", "stop_id": "STOP_NEW", "route_id": "ROUTE_NEW"}
     ]
     stale_issue_id = f"{mock_entry.entry_id}_STOP_OLD_ROUTE_OLD"
@@ -670,7 +671,7 @@ async def test_current_unmatched_pair_not_cleared_as_stale(
     create, delete, get_registry = mock_ir
     mock_cache.available = True
     mock_cache.has_scheduled_pair = MagicMock(return_value=False)
-    mock_entry.data["sensors"] = [
+    mock_entry.options["sensors"] = [
         {"name": "Farranlea Pk 220", "stop_id": "8370B2418801", "route_id": "220"}
     ]
     issue_id = f"{mock_entry.entry_id}_8370B2418801_220"

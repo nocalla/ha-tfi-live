@@ -47,7 +47,7 @@ async def async_get_config_entry_diagnostics(
 
     sensors = [
         {k: v for k, v in sensor_cfg.items() if k != CONF_API_KEY}
-        for sensor_cfg in entry.data.get(CONF_SENSORS, [])
+        for sensor_cfg in entry.options.get(CONF_SENSORS, [])
     ]
 
     return {

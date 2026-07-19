@@ -72,7 +72,7 @@ async def async_setup_entry(
     num_departures: int = entry.data.get(CONF_NUM_DEPARTURES, DEFAULT_NUM_DEPARTURES)
     entities = [
         TfiLiveSensor(coordinator, sensor_config, entry.entry_id, num_departures)
-        for sensor_config in entry.data[CONF_SENSORS]
+        for sensor_config in entry.options.get(CONF_SENSORS, [])
     ]
     async_add_entities(entities, True)
 

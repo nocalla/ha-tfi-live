@@ -108,7 +108,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: TfiLiveConfigEntry) -> b
 
     # Restrict the static GTFS parse to the configured stops — indexing the
     # full nationwide feed is what OOM-killed low-memory hosts (#100).
-    stop_ids = {sensor[CONF_STOP_ID] for sensor in entry.data.get(CONF_SENSORS, [])}
+    stop_ids = {sensor[CONF_STOP_ID] for sensor in entry.options.get(CONF_SENSORS, [])}
 
     cache = StaticGtfsClient(
         static_gtfs_url=entry.data[CONF_STATIC_GTFS_URL],
